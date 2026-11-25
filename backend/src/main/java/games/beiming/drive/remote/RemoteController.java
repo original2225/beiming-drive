@@ -51,4 +51,12 @@ public class RemoteController {
         service.cancel(currentUser.require().userId(), id);
         return ApiResponse.ok(null);
     }
+
+    /** 删除任务记录。只允许删已结束的（DONE/FAILED/CANCELED），运行中的必须先 cancel。
+     *  没有这个接口的话，失败的任务会永远堆在列表里清不掉。 */
+    @DeleteMapping("/jobs/{id}")
+    public ApiResponse<Void> delete(@PathVariable String id) {
+        service.delete(currentUser.require().userId(), id);
+        return ApiResponse.ok(null);
+    }
 }

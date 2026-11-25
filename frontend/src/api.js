@@ -106,6 +106,7 @@ export const api = {
     request('/remote/jobs', { method: 'POST', body: { url, filename, targetParentId, workers } }),
   remoteJobs: () => request('/remote/jobs'),
   cancelRemote: (id) => request(`/remote/jobs/${id}/cancel`, { method: 'POST' }),
+  deleteRemote: (id) => request(`/remote/jobs/${id}`, { method: 'DELETE' }),
 };
 
 export function downloadUrl(id) {

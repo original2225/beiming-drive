@@ -152,6 +152,31 @@ public class RemoteDownloadService {
         jdbc.update("update drv_remote_job set status='CANCELED', updated_at=now() where id=?", jobId);
     }
 
+    /**
+     * 删除任务记录。运行中的不给删，必须先 cancel —— 否则后台线程还在写
+     * drv_remote_job，行被删掉后会一直报「找不到任务」。
+     */
+    public void delete(long ownerId, String jobId) {
+        Job job = byId(ownerId, jobId);
+        String st = job.status();
+        if ("PENDING".equals(st) || "RUNNING".equals(st)) {
+            throw new DriveException(ErrorCode.CONFLICT, "任务还在进行，先取消再删除");
+        }
+        running.remove(jobId);
+        jdbc.update("delete from drv_remote_job where id=? and owner_id=?", jobId, ownerId);
+        // 清掉这个任务的临时分片目录，别把磁盘越堆越满
+        try {
+            Path dir = workDir.resolve(jobId);
+            if (Files.exists(dir)) {
+                Files.walk(dir)
+                     .sorted(Comparator.reverseOrder())
+                     .forEach(p -> { try { Files.deleteIfExists(p); } catch (IOException ignored) {} });
+            }
+        } catch (IOException ignored) {
+            // 临时目录清不掉不影响任务记录删除，下次启动也会被清理
+        }
+    }
+
     private void execute(long ownerId, Job job, JobHandle h) {
         Path jobDir = workDir.resolve(job.id());
         try {

@@ -75,6 +75,9 @@
             <button v-if="j.fileNodeId" class="btn btn-sm" @click="openFile(j)">查看</button>
             <button v-if="j.status === 'RUNNING' || j.status === 'PENDING'"
                     class="btn btn-sm btn-danger" @click="cancel(j)">取消</button>
+            <!-- 已结束的任务给个删除，否则失败记录会一直堆在列表里 -->
+            <button v-if="['DONE','FAILED','CANCELED'].includes(j.status)"
+                    class="btn btn-sm" @click="remove(j)">删除</button>
           </div>
         </div>
       </div>
@@ -137,6 +140,11 @@ async function create() {
 
 async function cancel(j) {
   try { await api.cancelRemote(j.id); await load() } catch (e) { alert(e.message) }
+}
+
+async function remove(j) {
+  if (!confirm(`删除任务「${j.filename}」的记录？已下载的文件不受影响`)) return
+  try { await api.deleteRemote(j.id); await load() } catch (e) { alert(e.message) }
 }
 
 function openFile(j) {
