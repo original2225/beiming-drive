@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: drive-postgres
+    environment:
+      POSTGRES_DB: beiming_drive
+      POSTGRES_USER: beiming
+      # 本地开发用。密码从 .env 读，没有就报错，别把明文写进仓库
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?需要 POSTGRES_PASSWORD，见 .env.example}
+    ports:
+      - "5440:5432"
+    volumes:
+      - ./data/pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U beiming -d beiming_drive"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped

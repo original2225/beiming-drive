@@ -1,0 +1,58 @@
+# 生产/远端部署用。本地开发仍用 compose.yml（只起数据库）。
+# 启动：docker compose -f compose.prod.yml up -d --build
+#
+# 三个必须自己改的值（写在 .env 里，别提交进仓库）：
+#   POSTGRES_PASSWORD   数据库密码
+#   DRIVE_JWT_SECRET    必须 >= 32 字节，否则后端启动即失败
+#   DRIVE_PORT          对外端口，默认 8140
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: drive-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-beiming_drive}
+      POSTGRES_USER: ${POSTGRES_USER:-beiming}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 必须设置}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-beiming} -d ${POSTGRES_DB:-beiming_drive}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    # 不对外暴露端口，只有 app 能连
+    networks: [drive]
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: drive-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-beiming_drive}
+      DB_USER: ${POSTGRES_USER:-beiming}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 必须设置}
+      DRIVE_JWT_SECRET: ${DRIVE_JWT_SECRET:?DRIVE_JWT_SECRET 必须设置}
+      TZ: Asia/Shanghai
+    ports:
+      - "${DRIVE_PORT:-8140}:8140"
+    volumes:
+      # 文件实体和远程下载临时目录必须持久化，否则重建容器就丢数据
+      - blobs:/data/blobs
+      - remote:/data/remote
+    restart: unless-stopped
+    networks: [drive]
+
+volumes:
+  pgdata:
+  blobs:
+  remote:
+
+networks:
+  drive:
+    driver: bridge

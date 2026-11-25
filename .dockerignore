@@ -1,0 +1,28 @@
+# 构建上下文里绝对不能进镜像的东西
+# 少了这个，node_modules 和 data 会被整个塞进 docker build 的上下文，慢到不可接受
+
+**/node_modules
+**/target
+**/dist
+.git
+.gitignore
+.idea
+.vscode
+
+# 数据不是构建产物，容器里的数据走命名卷，不从这里拷
+data
+**/data/pgdata
+**/data/blobs
+**/data/remote
+
+# 凭据绝不能进镜像层（进了镜像就等于泄露，历史层删不掉）
+.env
+.env.*
+
+# 本机的一次性截图和日志
+*.png
+*.log
+notes
+show-*.png
+now-*.png
+shot-*.png

@@ -1,0 +1,54 @@
+server:
+  port: 8140
+  tomcat:
+    max-swallow-size: -1
+    max-http-form-post-size: -1
+
+spring:
+  application:
+    name: beiming-drive
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://postgres:5432/beiming_drive}
+    username: ${DB_USER:beiming}
+    # 不提供默认值：没设 DB_PASSWORD 就启动失败，避免拿公开的示例密码上线
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 12
+  servlet:
+    multipart:
+      max-file-size: 8GB
+      max-request-size: 8GB
+      file-size-threshold: 2MB
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+drive:
+  web:
+    dist: ${DRIVE_WEB_DIST:/app/web}
+  storage:
+    root: ${DRIVE_STORAGE_ROOT:/data/blobs}
+  auth:
+    # 不提供默认值：没设 DRIVE_JWT_SECRET 就启动失败，避免拿公开的示例密钥上线
+    jwt-secret: ${DRIVE_JWT_SECRET}
+    token-ttl-hours: 168
+  upload:
+    default-chunk-size: 8388608   # 8MiB
+  remote:
+    workers-max: 32
+    work-dir: ${DRIVE_WORK_DIR:/data/remote}
+    chunk-size: 8388608
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    games.beiming.drive: INFO

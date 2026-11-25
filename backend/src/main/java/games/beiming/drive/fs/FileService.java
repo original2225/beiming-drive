@@ -1,0 +1,328 @@
+package games.beiming.drive.fs;
+
+import games.beiming.drive.common.DriveException;
+import games.beiming.drive.common.ErrorCode;
+import games.beiming.drive.storage.BlobStore;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.sql.PreparedStatement;
+import java.sql.Statement;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * 文件系统服务：目录树、文件条目、回收站。
+ * path 是全路径唯一键；改名/移动要级联更新子树的 path 前缀。
+ */
+@Service
+public class FileService {
+
+    private final JdbcTemplate jdbc;
+    private final BlobStore blobs;
+
+    public FileService(JdbcTemplate jdbc, BlobStore blobs) {
+        this.jdbc = jdbc;
+        this.blobs = blobs;
+    }
+
+    /** 供分片上传在合并后写入 blob 使用，避免再注入一次。 */
+    public BlobStore blobStore() {
+        return blobs;
+    }
+
+    public record Node(long id, long ownerId, Long parentId, String name, String path,
+                       String kind, long size, String mime, String sha256,
+                       String status, Instant createdAt, Instant updatedAt) {
+
+        public boolean isDir() {
+            return "dir".equals(kind);
+        }
+    }
+
+    private static final RowMapper<Node> MAPPER = (rs, i) -> new Node(
+            rs.getLong("id"), rs.getLong("owner_id"),
+            (Long) rs.getObject("parent_id"),
+            rs.getString("name"), rs.getString("path"), rs.getString("kind"),
+            rs.getLong("size"), rs.getString("mime"), rs.getString("sha256"),
+            rs.getString("status"),
+            rs.getTimestamp("created_at").toInstant(),
+            rs.getTimestamp("updated_at").toInstant());
+
+    private static String join(String parentPath, String name) {
+        if ("/".equals(parentPath)) return "/" + name;
+        return parentPath + "/" + name;
+    }
+
+    public Node rootOf(long ownerId) {
+        List<Node> rows = jdbc.query(
+                "select * from drv_node where owner_id=? and parent_id is null", MAPPER, ownerId);
+        if (rows.isEmpty()) throw new DriveException(ErrorCode.NOT_FOUND, "根目录缺失");
+        return rows.get(0);
+    }
+
+    public Node byId(long ownerId, long id) {
+        List<Node> rows = jdbc.query(
+                "select * from drv_node where owner_id=? and id=?", MAPPER, ownerId, id);
+        if (rows.isEmpty()) throw new DriveException(ErrorCode.NOT_FOUND);
+        return rows.get(0);
+    }
+
+    public Node byPath(long ownerId, String path) {
+        List<Node> rows = jdbc.query(
+                "select * from drv_node where owner_id=? and path=?", MAPPER, ownerId, path);
+        if (rows.isEmpty()) throw new DriveException(ErrorCode.NOT_FOUND);
+        return rows.get(0);
+    }
+
+    /** 列目录：parentId 为 null 表示根。不看回收站。根节点自身不列。 */
+    public List<Node> list(long ownerId, Long parentId) {
+        return list(ownerId, parentId, "name", "asc");
+    }
+
+    /**
+     * 带排序的列目录。orderBy 只接受白名单，防止 SQL 注入。
+     * 文件夹永远排前面，这是网盘的基本预期。
+     */
+    public List<Node> list(long ownerId, Long parentId, String orderBy, String direction) {
+        Long pid = (parentId == null) ? rootOf(ownerId).id() : parentId;
+        String col = switch (orderBy == null ? "name" : orderBy) {
+            case "size" -> "size";
+            case "updatedAt" -> "updated_at";
+            default -> "name";
+        };
+        String dir = "desc".equalsIgnoreCase(direction) ? "desc" : "asc";
+        return jdbc.query("select * from drv_node where owner_id=? and parent_id=? " +
+                "and status <> 'TRASHED' order by kind desc, " + col + " " + dir,
+                MAPPER, ownerId, pid);
+    }
+
+    /** 全局搜索（按名字模糊匹配，跨目录）。回收站不参与。 */
+    public List<Node> search(long ownerId, String keyword, int limit) {
+        if (keyword == null || keyword.isBlank()) return List.of();
+        String like = "%" + keyword.trim().toLowerCase() + "%";
+        return jdbc.query("select * from drv_node where owner_id=? and parent_id is not null " +
+                        "and status <> 'TRASHED' and lower(name) like ? " +
+                        "order by kind desc, updated_at desc limit ?",
+                MAPPER, ownerId, like, limit);
+    }
+
+    @Transactional
+    public Node mkdir(long ownerId, Long parentId, String name) {
+        Node parent = parentId == null ? rootOf(ownerId) : byId(ownerId, parentId);
+        if (!parent.isDir()) throw new DriveException(ErrorCode.BAD_REQUEST, "父节点不是目录");
+        String path = join(parent.path(), name);
+        Integer dup = jdbc.queryForObject(
+                "select count(*) from drv_node where owner_id=? and path=? and status<>'TRASHED'",
+                Integer.class, ownerId, path);
+        if (dup != null && dup > 0) throw new DriveException(ErrorCode.CONFLICT);
+
+        KeyHolder kh = new GeneratedKeyHolder();
+        jdbc.update(con -> {
+            PreparedStatement ps = con.prepareStatement(
+                    "insert into drv_node(owner_id,parent_id,name,path,kind) values (?,?,?,?,'dir')",
+                    new String[]{"id"});
+            ps.setLong(1, ownerId);
+            ps.setLong(2, parent.id());
+            ps.setString(3, name);
+            ps.setString(4, path);
+            return ps;
+        }, kh);
+        return byId(ownerId, java.util.Objects.requireNonNull(kh.getKey()).longValue());
+    }
+
+    /** 建文件条目（内容已落到 blob 之后调用）。同名已存在则覆盖内容。 */
+    @Transactional
+    public Node putFile(long ownerId, Long parentId, String name, String mime,
+                        String sha256, long size) {
+        Node parent = parentId == null ? rootOf(ownerId) : byId(ownerId, parentId);
+        if (!parent.isDir()) throw new DriveException(ErrorCode.BAD_REQUEST, "父节点不是目录");
+        String path = join(parent.path(), name);
+
+        List<Node> existing = jdbc.query(
+                "select * from drv_node where owner_id=? and path=? and status<>'TRASHED'",
+                MAPPER, ownerId, path);
+        if (!existing.isEmpty()) {
+            Node old = existing.get(0);
+            if (old.isDir()) throw new DriveException(ErrorCode.CONFLICT, "同名目录已存在");
+            long delta = size - old.size();
+            adjustQuota(ownerId, delta);
+            jdbc.update("update drv_node set sha256=?, size=?, mime=?, status='READY', " +
+                            "updated_at=now() where id=?",
+                    sha256, size, mime, old.id());
+            return byId(ownerId, old.id());
+        }
+
+        adjustQuota(ownerId, size);
+        KeyHolder kh = new GeneratedKeyHolder();
+        jdbc.update(con -> {
+            PreparedStatement ps = con.prepareStatement(
+                    "insert into drv_node(owner_id,parent_id,name,path,kind,size,mime,sha256,status) " +
+                            "values (?,?,?,?,'file',?,?,?,'READY')",
+                    new String[]{"id"});
+            ps.setLong(1, ownerId);
+            ps.setLong(2, parent.id());
+            ps.setString(3, name);
+            ps.setString(4, path);
+            ps.setLong(5, size);
+            ps.setString(6, mime);
+            ps.setString(7, sha256);
+            return ps;
+        }, kh);
+        return byId(ownerId, java.util.Objects.requireNonNull(kh.getKey()).longValue());
+    }
+
+    private void adjustQuota(long ownerId, long delta) {
+        if (delta == 0) return;
+        if (delta > 0) {
+            Integer ok = jdbc.queryForObject(
+                    "select count(*) from drv_user where id=? and storage_used + ? <= storage_quota",
+                    Integer.class, ownerId, delta);
+            if (ok == null || ok == 0) throw new DriveException(ErrorCode.QUOTA_EXCEEDED);
+        }
+        jdbc.update("update drv_user set storage_used = greatest(0, storage_used + ?) where id=?",
+                delta, ownerId);
+    }
+
+    /** 移入回收站（目录级联）。 */
+    @Transactional
+    public void trash(long ownerId, long id) {
+        Node n = byId(ownerId, id);
+        if (n.parentId() == null) throw new DriveException(ErrorCode.BAD_REQUEST, "不能删除根目录");
+        jdbc.update("update drv_node set status='TRASHED', trashed_at=now() " +
+                "where owner_id=? and (id=? or path like ?)", ownerId, id, n.path() + "/%");
+        adjustQuota(ownerId, -(subtreeBytes(ownerId, id)));
+    }
+
+    private long subtreeBytes(long ownerId, long id) {
+        Long v = jdbc.queryForObject(
+                "select coalesce(sum(size),0) from drv_node where owner_id=? " +
+                        "and kind='file' and (id=? or path like (select path from drv_node where id=?) || '/%')",
+                Long.class, ownerId, id, id);
+        return v == null ? 0L : v;
+    }
+
+    @Transactional
+    public void restore(long ownerId, long id) {
+        Node n = byId(ownerId, id);
+        jdbc.update("update drv_node set status='READY', trashed_at=null " +
+                "where owner_id=? and (id=? or path like ?)", ownerId, id, n.path() + "/%");
+        adjustQuota(ownerId, subtreeBytes(ownerId, id));
+    }
+
+    /** 彻底删除（含 blob 引用计数不管，交给后续 GC 任务）。 */
+    @Transactional
+    public void purge(long ownerId, long id) {
+        Node n = byId(ownerId, id);
+        jdbc.update("delete from drv_node where owner_id=? and (id=? or path like ?)",
+                ownerId, id, n.path() + "/%");
+    }
+
+    public List<Node> trashList(long ownerId) {
+        return jdbc.query("select * from drv_node where owner_id=? and status='TRASHED' " +
+                "and parent_id is not null order by trashed_at desc", MAPPER, ownerId);
+    }
+
+    /** 改名或移动：级联更新子树 path。 */
+    @Transactional
+    public Node rename(long ownerId, long id, String newName) {
+        Node n = byId(ownerId, id);
+        if (n.parentId() == null) throw new DriveException(ErrorCode.BAD_REQUEST, "不能重命名根目录");
+        Node parent = byId(ownerId, n.parentId());
+        String newPath = join(parent.path(), newName);
+
+        Integer dup = jdbc.queryForObject(
+                "select count(*) from drv_node where owner_id=? and path=? and id<>? and status<>'TRASHED'",
+                Integer.class, ownerId, newPath, id);
+        if (dup != null && dup > 0) throw new DriveException(ErrorCode.CONFLICT);
+
+        // 先改子树里深层节点的 path，再改自己，避免前缀互相覆盖
+        List<Node> descendants = jdbc.query(
+                "select * from drv_node where owner_id=? and path like ? order by length(path) desc",
+                MAPPER, ownerId, n.path() + "/%");
+        List<Object[]> batch = new ArrayList<>();
+        for (Node d : descendants) {
+            batch.add(new Object[]{newPath + d.path().substring(n.path().length()), d.id()});
+        }
+        jdbc.batchUpdate("update drv_node set path=?, updated_at=now() where id=?", batch);
+        jdbc.update("update drv_node set name=?, path=?, updated_at=now() where id=?",
+                newName, newPath, id);
+        return byId(ownerId, id);
+    }
+
+    /**
+     * 把节点移到另一个目录（保持自己的名字）。
+     *
+     * 注意：不能直接复用 rename(id, n.name())——rename 是按「节点当前的 parent」拼新路径的，
+     * 那样拼出来的还是旧路径，移动等于没动。必须显式用目标目录的 path 拼。
+     * 子树 path 要级联更新，并且先改深层再改自己，避免前缀互相覆盖。
+     */
+    @Transactional
+    public Node move(long ownerId, long id, long targetParentId) {
+        Node n = byId(ownerId, id);
+        if (n.parentId() == null) throw new DriveException(ErrorCode.BAD_REQUEST, "不能移动根目录");
+
+        Node target = byId(ownerId, targetParentId);
+        if (!target.isDir()) throw new DriveException(ErrorCode.BAD_REQUEST, "目标不是目录");
+        if (n.id() == target.id()) throw new DriveException(ErrorCode.BAD_REQUEST, "不能移动到自身");
+        // 目标在自身子树内 = 会形成环
+        if (target.path().equals(n.path()) || target.path().startsWith(n.path() + "/")) {
+            throw new DriveException(ErrorCode.BAD_REQUEST, "不能移动到自己的子目录");
+        }
+
+        String newPath = join(target.path(), n.name());
+        Integer dup = jdbc.queryForObject(
+                "select count(*) from drv_node where owner_id=? and path=? and id<>? and status<>'TRASHED'",
+                Integer.class, ownerId, newPath, id);
+        if (dup != null && dup > 0) {
+            throw new DriveException(ErrorCode.CONFLICT, "目标目录已有同名条目");
+        }
+
+        List<Node> descendants = jdbc.query(
+                "select * from drv_node where owner_id=? and path like ? order by length(path) desc",
+                MAPPER, ownerId, n.path() + "/%");
+        List<Object[]> batch = new ArrayList<>();
+        for (Node d : descendants) {
+            batch.add(new Object[]{newPath + d.path().substring(n.path().length()), d.id()});
+        }
+        jdbc.batchUpdate("update drv_node set path=?, updated_at=now() where id=?", batch);
+        jdbc.update("update drv_node set parent_id=?, path=?, updated_at=now() where id=?",
+                target.id(), newPath, id);
+        return byId(ownerId, id);
+    }
+
+    /** 递归统计：目录数/文件数/字节。用于验收。 */
+    public record Stats(int dirs, int files, long bytes) {
+    }
+
+    public Stats stats(long ownerId, Long parentId) {
+        List<Node> all = jdbc.query(
+                "select * from drv_node where owner_id=? and status<>'TRASHED'", MAPPER, ownerId);
+        // 从 parentId 出发按 path 前缀归属
+        String base;
+        if (parentId == null) {
+            base = "/";
+        } else {
+            base = byId(ownerId, parentId).path();
+        }
+        int dirs = 0, files = 0;
+        long bytes = 0;
+        for (Node n : all) {
+            if (n.parentId() == null) continue;
+            boolean inside = "/".equals(base) || n.path().startsWith(base + "/");
+            if (!inside) continue;
+            if (n.isDir()) dirs++;
+            else {
+                files++;
+                bytes += n.size();
+            }
+        }
+        return new Stats(dirs, files, bytes);
+    }
+}

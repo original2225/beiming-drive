@@ -1,0 +1,20 @@
+# 凭据
+.env
+.env.local
+
+# 构建产物
+frontend/node_modules
+frontend/dist
+backend/target
+
+# 运行时数据（容器化后不进仓库，本地开发时也可能产生）
+data/pgdata
+data/blobs
+data/remote
+
+# 本机临时文件
+*.log
+now-*.png
+show-*.png
+shot-*.png
+*.bak
