@@ -28,8 +28,11 @@ FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 
 # 非 root 运行；数据目录必须可写
+# 注意：这里必须把「每一个会被具名卷挂载的子目录」都建出来并 chown。
+# Docker 创建新具名卷时会复制镜像内该目录的属主/权限；目录不存在时卷归 root，
+# 而进程以 drive 身份跑 → Lucene 写 write.lock 直接 AccessDeniedException。
 RUN addgroup -S drive && adduser -S -G drive drive \
- && mkdir -p /data/blobs /data/remote /app/web \
+ && mkdir -p /data/blobs /data/remote /data/search-index /app/web \
  && chown -R drive:drive /data /app
 
 COPY --from=api /build/target/beiming-drive-*.jar /app/app.jar
@@ -39,6 +42,7 @@ ENV JAVA_OPTS="-XX:MaxRAMPercentage=75 -Dfile.encoding=UTF-8" \
     DRIVE_WEB_DIST=/app/web \
     DRIVE_STORAGE_ROOT=/data/blobs \
     DRIVE_WORK_DIR=/data/remote \
+    DRIVE_SEARCH_INDEX=/data/search-index \
     TZ=Asia/Shanghai
 
 USER drive

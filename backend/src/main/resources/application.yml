@@ -39,6 +39,9 @@ drive:
     workers-max: 32
     work-dir: ${DRIVE_WORK_DIR:/data/remote}
     chunk-size: 8388608
+  search:
+    # Lucene 索引目录。放在卷上才能重启后保留；丢了会在启动时自动全量重建。
+    index-dir: ${DRIVE_SEARCH_INDEX:/data/search-index}
 
 management:
   endpoints:

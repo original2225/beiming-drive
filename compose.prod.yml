@@ -45,6 +45,9 @@ services:
       # 文件实体和远程下载临时目录必须持久化，否则重建容器就丢数据
       - blobs:/data/blobs
       - remote:/data/remote
+      # Lucene 索引也要持久化：丢了能在启动时自动重建，但重建对几万条数据
+      # 要花几秒，且重建期间搜索是空的，没必要每次重建都付这个代价
+      - searchidx:/data/search-index
     restart: unless-stopped
     networks: [drive]
 
@@ -52,6 +55,7 @@ volumes:
   pgdata:
   blobs:
   remote:
+  searchidx:
 
 networks:
   drive:

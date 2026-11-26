@@ -26,10 +26,26 @@ public class FileService {
 
     private final JdbcTemplate jdbc;
     private final BlobStore blobs;
+    /** 搜索索引同步。用 setter 注入，因为 FsSearchSync 依赖 FileService.Node 的构造，直接构造注入会成环。 */
+    private FsSearchSync searchSync;
 
     public FileService(JdbcTemplate jdbc, BlobStore blobs) {
         this.jdbc = jdbc;
         this.blobs = blobs;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setSearchSync(FsSearchSync searchSync) {
+        this.searchSync = searchSync;
+    }
+
+    /** 索引同步是可选的：没装配就跳过（比如单元测试里） */
+    private void indexPut(Node n) {
+        if (searchSync != null && n != null && !"TRASHED".equals(n.status())) searchSync.put(n);
+    }
+
+    private void indexRemove(long id) {
+        if (searchSync != null) searchSync.remove(id);
     }
 
     /** 供分片上传在合并后写入 blob 使用，避免再注入一次。 */
@@ -103,14 +119,32 @@ public class FileService {
                 MAPPER, ownerId, pid);
     }
 
-    /** 全局搜索（按名字模糊匹配，跨目录）。回收站不参与。 */
+    /**
+     * 全局搜索，走 Lucene 索引（支持中文子串、拼音、首字母、拼写容错、相关度排序）。
+     *
+     * <p>取代了原来的 {@code lower(name) like '%kw%'}：
+     * LIKE 不能打拼音、不能容错、也没有相关度（只能按时间排）。
+     * 回收站不参与 —— 索引里本来就不放 TRASHED 的节点。
+     */
     public List<Node> search(long ownerId, String keyword, int limit) {
         if (keyword == null || keyword.isBlank()) return List.of();
-        String like = "%" + keyword.trim().toLowerCase() + "%";
-        return jdbc.query("select * from drv_node where owner_id=? and parent_id is not null " +
-                        "and status <> 'TRASHED' and lower(name) like ? " +
-                        "order by kind desc, updated_at desc limit ?",
-                MAPPER, ownerId, like, limit);
+        if (searchSync == null) return List.of();
+
+        List<Node> out = new ArrayList<>();
+        for (games.beiming.drive.search.SearchIndex.Hit h :
+                searchSync.search(String.valueOf(ownerId), keyword, limit)) {
+            Object idObj = h.doc().payload().get("id");
+            if (idObj == null) continue;
+            long id = Long.parseLong(String.valueOf(idObj));
+            // 回库取当前状态：索引可能比库慢一拍（极小概率），以库为准
+            try {
+                out.add(byId(ownerId, id));
+            } catch (RuntimeException ignored) {
+                // 索引里有、库里已没（刚删），跳过并顺手清掉
+                indexRemove(id);
+            }
+        }
+        return out;
     }
 
     @Transactional
@@ -134,7 +168,9 @@ public class FileService {
             ps.setString(4, path);
             return ps;
         }, kh);
-        return byId(ownerId, java.util.Objects.requireNonNull(kh.getKey()).longValue());
+        Node created = byId(ownerId, java.util.Objects.requireNonNull(kh.getKey()).longValue());
+        indexPut(created);
+        return created;
     }
 
     /** 建文件条目（内容已落到 blob 之后调用）。同名已存在则覆盖内容。 */
@@ -156,7 +192,9 @@ public class FileService {
             jdbc.update("update drv_node set sha256=?, size=?, mime=?, status='READY', " +
                             "updated_at=now() where id=?",
                     sha256, size, mime, old.id());
-            return byId(ownerId, old.id());
+            Node updated = byId(ownerId, old.id());
+            indexPut(updated);
+            return updated;
         }
 
         adjustQuota(ownerId, size);
@@ -175,7 +213,9 @@ public class FileService {
             ps.setString(7, sha256);
             return ps;
         }, kh);
-        return byId(ownerId, java.util.Objects.requireNonNull(kh.getKey()).longValue());
+        Node created = byId(ownerId, java.util.Objects.requireNonNull(kh.getKey()).longValue());
+        indexPut(created);
+        return created;
     }
 
     private void adjustQuota(long ownerId, long delta) {
@@ -198,6 +238,13 @@ public class FileService {
         jdbc.update("update drv_node set status='TRASHED', trashed_at=now() " +
                 "where owner_id=? and (id=? or path like ?)", ownerId, id, n.path() + "/%");
         adjustQuota(ownerId, -(subtreeBytes(ownerId, id)));
+        // 回收站里的不进索引，整棵子树都摘掉
+        indexRemove(id);
+        for (Node d : jdbc.query(
+                "select * from drv_node where owner_id=? and path like ?",
+                MAPPER, ownerId, n.path() + "/%")) {
+            indexRemove(d.id());
+        }
     }
 
     private long subtreeBytes(long ownerId, long id) {
@@ -214,12 +261,25 @@ public class FileService {
         jdbc.update("update drv_node set status='READY', trashed_at=null " +
                 "where owner_id=? and (id=? or path like ?)", ownerId, id, n.path() + "/%");
         adjustQuota(ownerId, subtreeBytes(ownerId, id));
+        // 恢复后重新进索引
+        for (Node d : jdbc.query(
+                "select * from drv_node where owner_id=? and (id=? or path like ?)",
+                MAPPER, ownerId, id, n.path() + "/%")) {
+            indexPut(d);
+        }
     }
 
     /** 彻底删除（含 blob 引用计数不管，交给后续 GC 任务）。 */
     @Transactional
     public void purge(long ownerId, long id) {
         Node n = byId(ownerId, id);
+        // 先摘索引再删数据：索引里留着已不存在的条目，搜到了点进去会 404
+        indexRemove(id);
+        for (Node d : jdbc.query(
+                "select * from drv_node where owner_id=? and path like ?",
+                MAPPER, ownerId, n.path() + "/%")) {
+            indexRemove(d.id());
+        }
         jdbc.update("delete from drv_node where owner_id=? and (id=? or path like ?)",
                 ownerId, id, n.path() + "/%");
     }
@@ -253,7 +313,15 @@ public class FileService {
         jdbc.batchUpdate("update drv_node set path=?, updated_at=now() where id=?", batch);
         jdbc.update("update drv_node set name=?, path=?, updated_at=now() where id=?",
                 newName, newPath, id);
-        return byId(ownerId, id);
+        Node renamed = byId(ownerId, id);
+        // 改名会连带子树 path 全部变化，整棵子树重灌索引（path 也在可检索字段里）
+        indexPut(renamed);
+        for (Node d : jdbc.query(
+                "select * from drv_node where owner_id=? and path like ? and status<>'TRASHED'",
+                MAPPER, ownerId, newPath + "/%")) {
+            indexPut(d);
+        }
+        return renamed;
     }
 
     /**
@@ -294,7 +362,14 @@ public class FileService {
         jdbc.batchUpdate("update drv_node set path=?, updated_at=now() where id=?", batch);
         jdbc.update("update drv_node set parent_id=?, path=?, updated_at=now() where id=?",
                 target.id(), newPath, id);
-        return byId(ownerId, id);
+        Node moved = byId(ownerId, id);
+        indexPut(moved);
+        for (Node d : jdbc.query(
+                "select * from drv_node where owner_id=? and path like ? and status<>'TRASHED'",
+                MAPPER, ownerId, newPath + "/%")) {
+            indexPut(d);
+        }
+        return moved;
     }
 
     /** 递归统计：目录数/文件数/字节。用于验收。 */
