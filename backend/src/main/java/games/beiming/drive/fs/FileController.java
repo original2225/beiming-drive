@@ -38,15 +38,17 @@ public class FileController {
     public record MoveReq(long targetParentId) {
     }
 
-    /** 列目录。parentId 省略 = 根。支持 orderBy=name|size|updatedAt 与 asc|desc。 */
+    /** 列目录。parentId 省略 = 根。支持 orderBy=name|size|updatedAt 与 asc|desc。
+     *  parentId 同样收 String 走 parseParentId，理由见 upload 的注释。 */
     @GetMapping
     public ApiResponse<Map<String, Object>> list(
-            @RequestParam(required = false) Long parentId,
+            @RequestParam(required = false) String parentId,
             @RequestParam(required = false, defaultValue = "name") String orderBy,
             @RequestParam(required = false, defaultValue = "asc") String direction) {
         long uid = currentUser.require().userId();
-        List<FileService.Node> items = files.list(uid, parentId, orderBy, direction);
-        FileService.Stats stats = files.stats(uid, parentId);
+        Long pid = parseParentId(parentId);
+        List<FileService.Node> items = files.list(uid, pid, orderBy, direction);
+        FileService.Stats stats = files.stats(uid, pid);
         return ApiResponse.ok(Map.of(
                 "items", items,
                 "stats", stats
@@ -72,22 +74,37 @@ public class FileController {
     }
 
     /** 单请求直传（小文件走这条，大文件走分片上传）。
-     *  parentId 可省略 —— 省略即落根目录。不能写成必填参数，
-     *  否则往根目录上传会抛 MissingServletRequestParameterException（表面是 500）。 */
+     *  parentId 可省略 —— 省略即落根目录。
+     *  这里收 String 再手动解析，而不是直接 @RequestParam Long：前端若把 JS 的
+     *  null 拼进 URL（`parentId=null`），Spring 会拿 "null" 去 Long.valueOf 并抛
+     *  NumberFormatException，表面是 500。收字符串就能把 "null" / "" 一并当根目录。 */
     @PostMapping("/upload")
     public ApiResponse<FileService.Node> upload(
-            @RequestParam(required = false) Long parentId,
+            @RequestParam(required = false) String parentId,
             @RequestParam("file") MultipartFile file) {
         long uid = currentUser.require().userId();
         if (file.isEmpty()) throw new DriveException(ErrorCode.BAD_REQUEST, "文件为空");
         String name = file.getOriginalFilename();
         if (name == null || name.isBlank()) name = "unnamed";
+        Long pid = parseParentId(parentId);
         try (var in = file.getInputStream()) {
             BlobStore.Stored st = blobs.put(in);
-            return ApiResponse.ok(files.putFile(uid, parentId, name,
+            return ApiResponse.ok(files.putFile(uid, pid, name,
                     file.getContentType(), st.sha256(), st.size()));
         } catch (IOException e) {
             throw new DriveException(ErrorCode.STORAGE_ERROR, e.getMessage());
+        }
+    }
+
+    /** "null" / "" / 非数字 一律当根目录，别让脏参数变成 500 */
+    private static Long parseParentId(String raw) {
+        if (raw == null) return null;
+        String s = raw.trim();
+        if (s.isEmpty() || "null".equalsIgnoreCase(s)) return null;
+        try {
+            return Long.valueOf(s);
+        } catch (NumberFormatException e) {
+            throw new DriveException(ErrorCode.BAD_REQUEST, "parentId 不是合法数字：" + raw);
         }
     }
 

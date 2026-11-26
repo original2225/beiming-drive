@@ -1,7 +1,7 @@
 <template>
-  <div class="shell">
+  <div class="shell" :class="{ entering }">
     <!-- ===== 侧栏 ===== -->
-    <aside class="side">
+    <aside class="side" :class="{ 'intro-side': entering }">
       <div class="side-brand">
         <img src="/whale-flat-128.png" alt="logo" />
         <span>北冥云盘</span>
@@ -32,19 +32,11 @@
           <div class="bar"><div class="bar-in" :style="{ width: barPct + '%' }"></div></div>
           <div class="quota-num">{{ usedText }} / {{ quotaText }} · {{ pct }}%</div>
         </div>
-        <div class="side-user">
-          <div class="avatar">{{ (me?.nickname || 'U').slice(0, 1) }}</div>
-          <div class="who">
-            <div class="name">{{ me?.nickname }}</div>
-            <div class="mail muted" :title="me?.email">{{ me?.email }}</div>
-          </div>
-          <button class="icon-btn" title="退出" @click="logout">⏻</button>
-        </div>
       </div>
     </aside>
 
     <!-- ===== 主区 ===== -->
-    <main class="main">
+    <main class="main" :class="{ 'intro-main': entering }">
       <header class="topbar">
         <div class="crumbs">
           <template v-if="view === 'files'">
@@ -59,15 +51,38 @@
         </div>
 
         <div class="top-actions">
-          <div class="search-box">
-            <span class="search-ic">⌕</span>
-            <input v-model="keyword" placeholder="搜索全部文件…" @keyup.enter="doSearch" />
-            <button v-if="keyword" class="clear" @click="clearSearch">×</button>
-          </div>
-          <button class="icon-btn" title="刷新" @click="refresh">↻</button>
-          <button class="btn btn-sm" @click="newFolder">新建文件夹</button>
-        </div>
-      </header>
+                  <button class="icon-btn" title="刷新" @click="refresh">↻</button>
+
+                  <!-- 新建：圆角方框 + 粗十字，点开才展开具体动作 -->
+                  <div class="new-wrap">
+                    <button class="new-fab" :class="{ open: newMenu }" title="新建"
+                            @click.stop="newMenu = !newMenu">
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 5.2v13.6M5.2 12h13.6" />
+                      </svg>
+                    </button>
+                    <transition name="new-pop">
+                      <!-- 注意：这里不能写 @click.stop，它会截住子项的点击，菜单项永远收不到 click。
+                         要挡住的是"点菜单内部别关菜单"，交给 closeMenu 里判断 .new-wrap 即可。 -->
+                      <div v-if="newMenu" class="new-menu">
+                        <div class="new-item" @click="newAction('upload-files')">
+                          <i class="ni-ic">📄</i><span>上传文件</span>
+                        </div>
+                        <div class="new-item" @click="newAction('upload-folder')">
+                          <i class="ni-ic">📁</i><span>上传文件夹</span>
+                        </div>
+                        <div class="new-sep"></div>
+                        <div class="new-item" @click="newAction('mkdir')">
+                          <i class="ni-ic">🗂</i><span>新建文件夹</span>
+                        </div>
+                        <div class="new-item" @click="newAction('readme')">
+                          <i class="ni-ic">📝</i><span>新建 README</span>
+                        </div>
+                      </div>
+                    </transition>
+                  </div>
+                </div>
+              </header>
 
       <div class="bar-info">
         <span class="muted">
@@ -152,7 +167,94 @@
       </div>
     </main>
 
+    <!-- ===== 右侧竖栏 =====
+         折叠：顶部头像、底部放大镜，中间空白区提示「可以向左打开」
+         展开：头像 / 姓名 / 邮箱 / 用户信息 / 设置 / 主题，最下面放大镜 + 胶囊搜索框 -->
+    <aside class="rail" :class="{ open: railOpen }">
+      <!-- 折叠态的血条：只有头像和放大镜 -->
+      <transition name="rail-fade">
+        <div v-if="!railOpen" class="rail-mini">
+          <button class="mini-avatar" :title="me?.nickname || '账户'" @click="railOpen = true">
+            <span>{{ (me?.nickname || 'U').slice(0, 1) }}</span>
+          </button>
+
+          <!-- 中间空白：悬停提示可以向左打开 -->
+          <div class="rail-gap" @click="railOpen = true">
+            <span class="gap-tip">
+              <svg viewBox="0 0 24 24" class="gap-arrow" aria-hidden="true">
+                <path d="M15 6l-6 6 6 6" />
+              </svg>
+              <em>打开</em>
+            </span>
+          </div>
+
+          <button class="mini-search" title="搜索" @click="railOpen = true; nextTick(() => railSearch && railSearch.focus())">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="6.2" />
+              <path d="M15.2 15.2L20 20" />
+            </svg>
+          </button>
+        </div>
+      </transition>
+
+      <!-- 展开态 -->
+      <transition name="rail-slide">
+        <div v-if="railOpen" class="rail-full">
+          <div class="rail-head">
+            <div class="rail-avatar">{{ (me?.nickname || 'U').slice(0, 1) }}</div>
+            <div class="rail-who">
+              <div class="rail-name">{{ me?.nickname || '未登录' }}</div>
+              <div class="rail-mail" :title="me?.email">{{ me?.email }}</div>
+            </div>
+            <button class="rail-close" title="收起" @click="railOpen = false">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+            </button>
+          </div>
+
+          <div class="rail-quota">
+            <div class="rail-quota-bar"><div :style="{ width: barPct + '%' }"></div></div>
+            <div class="rail-quota-num">{{ usedText }} / {{ quotaText }}</div>
+          </div>
+
+          <nav class="rail-nav">
+            <button class="rail-item" @click="railMenuAction('profile')">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="8.2" r="3.6" /><path d="M4.8 20c.9-3.6 3.8-5.6 7.2-5.6s6.3 2 7.2 5.6" /></svg>
+              <span>用户信息</span>
+            </button>
+            <button class="rail-item" @click="railMenuAction('settings')">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.1" /><path d="M12 3.6v2.6M12 17.8v2.6M20.4 12h-2.6M6.2 12H3.6M18 6l-1.8 1.8M7.8 16.2L6 18M18 18l-1.8-1.8M7.8 7.8L6 6" /></svg>
+              <span>设置</span>
+            </button>
+            <button class="rail-item" @click="railMenuAction('theme')">
+              <svg viewBox="0 0 24 24"><path d="M12 3.8a8.2 8.2 0 1 0 0 16.4 2 2 0 0 0 0-4 1.4 1.4 0 0 1 0-2.8h3.6A4.6 4.6 0 0 0 20.2 9 8.2 8.2 0 0 0 12 3.8z" /></svg>
+              <span>主题</span>
+            </button>
+            <div class="rail-sep"></div>
+            <button class="rail-item" @click="railMenuAction('switch')">
+              <svg viewBox="0 0 24 24"><path d="M8 7h11M15.5 3.5L19 7l-3.5 3.5M16 17H5M8.5 13.5L5 17l3.5 3.5" /></svg>
+              <span>切换账号</span>
+            </button>
+            <button class="rail-item danger" @click="railMenuAction('logout')">
+              <svg viewBox="0 0 24 24"><path d="M14.5 5.2H7.8A1.8 1.8 0 0 0 6 7v10a1.8 1.8 0 0 0 1.8 1.8h6.7M17.5 12H10M14.6 8.7L18 12l-3.4 3.3" /></svg>
+              <span>退出登录</span>
+            </button>
+          </nav>
+
+          <!-- 最下面：放大镜 + 胶囊搜索框 -->
+          <div class="rail-search">
+            <svg viewBox="0 0 24 24" class="rs-ic" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="6.2" /><path d="M15.2 15.2L20 20" />
+            </svg>
+            <input ref="railSearch" v-model="keyword" placeholder="搜索全部文件…"
+                   @keyup.enter="doSearch" />
+            <button v-if="keyword" class="rs-clear" @click="clearSearch">×</button>
+          </div>
+        </div>
+      </transition>
+    </aside>
+
     <input ref="fileInput" type="file" multiple hidden @change="onPick" />
+    <input ref="folderInput" type="file" webkitdirectory directory multiple hidden @change="onPick" />
 
     <!-- 右键菜单：定位到鼠标处，超出视口自动翻转 -->
     <div v-if="ctxMenu" ref="ctxEl" class="ctx-menu" :style="ctxStyle" @click.stop>
@@ -319,6 +421,12 @@ const view = ref('files')
 const currentId = ref(null)
 const trail = ref([])
 const uploads = ref([])
+// 右侧竖栏是否展开（默认收起：顶部头像、底部放大镜）
+const railOpen = ref(false)
+// 新建菜单是否打开
+const newMenu = ref(false)
+const folderInput = ref(null)
+const railSearch = ref(null)
 const shareBox = ref(null)
 const moveBox = ref(null)
 const previewBox = ref(null)
@@ -327,6 +435,14 @@ const menuFor = ref(null)
 const ctxMenu = ref(null)
 const ctxEl = ref(null)
 const ctxStyle = ref({})
+// 首次进入主页时播一次入场动画；从其他页回来不重播（reduced-motion 时直接不播）
+const entering = ref(false)
+const SKIP_INTRO = (() => {
+  try {
+    return sessionStorage.getItem('drive_intro_played') === '1'
+      || window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  } catch { return false }
+})()
 // 通用输入框：{ title, hint, value, placeholder, okText, busy, err, submit }
 const promptBox = ref(null)
 const promptInput = ref(null)
@@ -584,23 +700,109 @@ async function runConfirm() {
 
 function pickUpload() { fileInput.value?.click() }
 
+// ---------- 新建菜单 ----------
+function newAction(kind) {
+  newMenu.value = false
+  if (kind === 'upload-files') { pickUpload(); return }
+  if (kind === 'upload-folder') { folderInput.value?.click(); return }
+  if (kind === 'mkdir') { newFolder(); return }
+  if (kind === 'readme') { createReadme(); return }
+}
+
+/** 新建 README：不新增后端接口，直接上传一个带初始内容的文本文件 */
+function createReadme() {
+  openPrompt({
+    title: '新建 README',
+    hint: '会创建一个 Markdown 文件，可以直接在里面写',
+    value: 'README.md',
+    okText: '创建',
+    submit: async (name) => {
+      if (!/\.(md|markdown)$/i.test(name)) name += '.md'
+      const body = `# ${name.replace(/\.(md|markdown)$/i, '')}\n\n`
+      const file = new File([body], name, { type: 'text/markdown' })
+      await uploadOne(file)
+      newMenu.value = false
+    },
+  })
+}
+
+// ---------- 右侧竖栏菜单 ----------
+function railMenuAction(kind) {
+  if (kind === 'profile') { showToast('个人主页还在做，先把用户信息放在这里'); railOpen.value = false; return }
+  if (kind === 'settings') { showToast('设置页还没做'); return }
+  if (kind === 'theme') { showToast('主题切换还没做'); return }
+  if (kind === 'switch') {
+    askConfirm({
+      title: '切换账号',
+      text: '切换会退出当前账号，回到登录页重新登录。确定吗？',
+      okText: '去登录页',
+      run: async () => { await logout() },
+    })
+    return
+  }
+  if (kind === 'logout') {
+    askConfirm({
+      title: '退出登录',
+      text: '确定退出当前账号？',
+      okText: '退出',
+      danger: true,
+      run: async () => { await logout() },
+    })
+  }
+}
+
 async function onPick(ev) {
   const files = [...ev.target.files]
   ev.target.value = ''
-  for (const f of files) await uploadOne(f)
+  for (const f of files) {
+    // 选文件夹时浏览器会给出 webkitRelativePath（如 "相册/2024/a.jpg"）。
+    // 只靠文件名会把所有文件平铺在根目录，所以先按路径逐级建目录。
+    const rel = f.webkitRelativePath || ''
+    if (rel) await uploadWithDir(f, rel)
+    else await uploadOne(f)
+  }
 }
 
-async function uploadOne(file) {
-  const key = file.name + '-' + Date.now()
+/** 按相对路径把目录建出来，再往最深一级上传 */
+async function uploadWithDir(file, rel) {
+  const parts = rel.split('/').filter(Boolean)
+  const dirs = parts.slice(0, -1)
+  let parent = currentId.value
+  for (const d of dirs) {
+    parent = await ensureDir(parent, d)
+    if (parent == null) return
+  }
+  await uploadOne(file, parent)
+}
+
+/** 目录已存在就复用，不存在就建。返回目录 id */
+async function ensureDir(parentId, name) {
+  try {
+    const list = await api.list(parentId, 'name', 'asc')
+    const items = list.items || []
+    const hit = items.find(x => x.kind === 'dir' && x.name === name)
+    if (hit) return hit.id
+  } catch (e) { /* 列失败就继续往下建 */ }
+  try {
+    const r = await api.mkdir(parentId, name)
+    return r && r.id != null ? r.id : null
+  } catch (e) {
+    showToast(`建目录「${name}」失败：${e.message}`, 'err')
+    return null
+  }
+}
+
+async function uploadOne(file, parent = currentId.value) {
+  const key = file.name + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6)
   const rec = { key, name: file.name, pct: 0 }
   uploads.value.push(rec)
   try {
     if (file.size <= CHUNK) {
-      await api.uploadSmall(currentId.value, file)
+      await api.uploadSmall(parent, file)
       rec.pct = 100
     } else {
       const total = Math.ceil(file.size / CHUNK)
-      const sess = await api.createUpload(currentId.value, file.name, file.size, CHUNK)
+      const sess = await api.createUpload(parent, file.name, file.size, CHUNK)
       let finished = 0, next = 0
       const CONC = 3
       async function worker() {
@@ -784,6 +986,8 @@ async function logout() {
 
 function closeMenu(e) {
   if (!e.target.closest || !e.target.closest('.more-wrap')) menuFor.value = null
+  // 新建菜单：点菜单外关掉（button 自己用 .stop 处理开关）
+  if (newMenu.value && (!e.target.closest || !e.target.closest('.new-wrap'))) newMenu.value = false
 }
 
 /** Esc 逐层关闭：右键菜单 → ⋯ 菜单 → 预览 → 移动框 */
@@ -799,6 +1003,16 @@ function onKey(e) {
 
 onMounted(() => {
   refresh()
+
+  // 入场：整页从薄雾里显形，侧栏与主区分层错开
+  if (!SKIP_INTRO) {
+    entering.value = true
+    // 只播一次：回到本页（切目录、进出子页）不再重来
+    try { sessionStorage.setItem('drive_intro_played', '1') } catch { /* 隐私模式忽略 */ }
+    // 必须晚于最长的那条动画（.main 1.06s），否则 class 被摘掉、动画半路断掉
+    setTimeout(() => { entering.value = false }, 1200)
+  }
+
   document.addEventListener('click', closeMenu)
   document.addEventListener('click', closeCtx)
   // 右键用 capture 阶段：先关掉旧菜单，再让目标自己的 handler 打开新菜单。
@@ -818,6 +1032,231 @@ onUnmounted(() => {
 
 <style scoped>
 .shell { display: flex; height: 100vh; overflow: hidden; background: var(--bg); }
+
+/* ================= 右侧竖栏 =================
+   收起时只占 62px：顶一个头像、底一个放大镜，中间是留白。
+   展开时宽到 268px，从右侧「向左推出」——用 width 过渡而不是 transform，
+   因为 transform 平移不会改变布局，会把主区内容盖住。 */
+.rail {
+  flex-shrink: 0;
+  width: 62px;
+  background: #fff;
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width .32s cubic-bezier(.3, .6, .35, 1);
+}
+.rail.open { width: 268px; }
+
+/* ---------- 收起态 ---------- */
+.rail-mini {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 0;
+  gap: 10px;
+}
+/* 头像和放大镜：悬停轻微放大 + 加深，给「这里能点」的反馈 */
+.mini-avatar, .mini-search {
+  width: 38px; height: 38px; border-radius: 50%;
+  display: grid; place-items: center; padding: 0;
+  border: 1px solid var(--line); background: #f7f8fc; color: var(--ink-2);
+  transition: transform .2s cubic-bezier(.3, .6, .35, 1), box-shadow .2s, background .2s, border-color .2s;
+}
+.mini-avatar span {
+  font-size: 14px; font-weight: 600; color: #fff; letter-spacing: .5px;
+}
+.mini-avatar {
+  background: linear-gradient(135deg, #5b76f7, #7b5bf7);
+  border-color: transparent;
+}
+.mini-avatar:hover {
+  transform: scale(1.12);
+  box-shadow: 0 6px 18px rgba(91, 118, 247, .38);
+}
+.mini-search svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; }
+.mini-search:hover {
+  transform: scale(1.14);
+  border-color: #cfd6ea;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 4px 14px rgba(20, 26, 48, .12);
+}
+
+/* 中间的留白：平时是空的，鼠标进来才浮出「打开」提示 */
+.rail-gap {
+  flex: 1;
+  width: 100%;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  position: relative;
+}
+.gap-tip {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  opacity: 0; transform: translateX(-4px);
+  transition: opacity .22s ease, transform .22s ease;
+  color: var(--ink-3); font-size: 10.5px;
+}
+.rail-gap:hover .gap-tip { opacity: 1; transform: none; }
+.gap-tip em { font-style: normal; }
+.gap-arrow {
+  width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+/* 展开态从上往下滑入 */
+.rail-slide-enter-active { transition: opacity .24s ease .04s, transform .3s cubic-bezier(.3, .6, .35, 1); }
+.rail-slide-leave-active { transition: opacity .14s ease, transform .14s ease; }
+.rail-slide-enter-from { opacity: 0; transform: translateX(16px); }
+.rail-slide-leave-to { opacity: 0; transform: translateX(10px); }
+.rail-fade-leave-active { transition: opacity .12s ease; }
+.rail-fade-leave-to { opacity: 0; }
+
+/* ---------- 展开态 ---------- */
+.rail-full {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 14px 14px;
+  width: 268px;
+}
+.rail-head { display: flex; align-items: center; gap: 10px; padding: 2px 2px 12px; }
+.rail-avatar {
+  width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0;
+  display: grid; place-items: center; color: #fff; font-size: 16px; font-weight: 600;
+  background: linear-gradient(135deg, #5b76f7, #7b5bf7);
+  box-shadow: 0 3px 12px rgba(91, 118, 247, .3);
+}
+.rail-who { min-width: 0; flex: 1; }
+.rail-name { font-size: 13.5px; font-weight: 600; overflow: hidden;
+             text-overflow: ellipsis; white-space: nowrap; }
+.rail-mail { font-size: 10.5px; color: var(--ink-3); overflow: hidden;
+             text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+.rail-close {
+  width: 26px; height: 26px; border-radius: 7px; flex-shrink: 0;
+  border: 1px solid transparent; background: transparent; color: var(--ink-3);
+  display: grid; place-items: center; transition: .16s;
+}
+.rail-close svg { width: 15px; height: 15px; fill: none; stroke: currentColor;
+                  stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
+.rail-close:hover { background: #f2f4fb; border-color: var(--line); color: var(--ink); }
+
+.rail-quota { padding: 0 2px 12px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+.rail-quota-bar { height: 4px; border-radius: 3px; background: #eef0f7; overflow: hidden; }
+.rail-quota-bar > div { height: 100%; border-radius: 3px;
+                        background: linear-gradient(90deg, #5b76f7, #7b5bf7);
+                        transition: width .3s ease; }
+.rail-quota-num { font-size: 10.5px; color: var(--ink-3); margin-top: 6px; }
+
+.rail-nav { display: flex; flex-direction: column; gap: 2px; }
+.rail-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; border-radius: 9px; border: 0; background: transparent;
+  font-size: 12.5px; color: var(--ink-2); text-align: left; width: 100%;
+  transition: background .15s, color .15s;
+}
+.rail-item svg { width: 17px; height: 17px; flex-shrink: 0; fill: none;
+                 stroke: currentColor; stroke-width: 1.7;
+                 stroke-linecap: round; stroke-linejoin: round; }
+.rail-item:hover { background: #f3f5fd; color: var(--ink); }
+.rail-item.danger { color: var(--danger); }
+.rail-item.danger:hover { background: #fff5f4; }
+.rail-sep { height: 1px; background: var(--line); margin: 6px 2px; }
+
+/* 最下方：放大镜 + 胶囊搜索框 */
+.rail-search {
+  margin-top: auto;
+  display: flex; align-items: center; gap: 6px;
+  height: 38px; padding: 0 4px 0 10px;
+  border: 1px solid var(--line); border-radius: 999px; background: #f7f8fc;
+  transition: border-color .2s, background .2s, box-shadow .2s;
+}
+.rail-search:focus-within {
+  border-color: #b9c4f5; background: #fff;
+  box-shadow: 0 0 0 3px rgba(91, 118, 247, .12);
+}
+.rs-ic { width: 17px; height: 17px; flex-shrink: 0; fill: none;
+         stroke: var(--ink-3); stroke-width: 1.9; stroke-linecap: round; }
+.rail-search input {
+  flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
+  font-size: 12.5px; color: var(--ink); padding: 0;
+}
+.rail-search input::placeholder { color: var(--ink-3); }
+.rs-clear {
+  width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+  border: 0; background: #e6e9f3; color: var(--ink-2);
+  font-size: 13px; line-height: 1; display: grid; place-items: center;
+}
+.rs-clear:hover { background: #d8dcec; }
+
+/* ---------- 顶栏「新建」按钮：圆角方框 + 粗十字 ---------- */
+.new-wrap { position: relative; }
+.new-fab {
+  width: 34px; height: 34px; border-radius: 10px;
+  border: 1px solid var(--line); background: #fff;
+  display: grid; place-items: center; padding: 0;
+  transition: background .18s, border-color .18s, box-shadow .18s, transform .18s;
+}
+.new-fab svg {
+  width: 17px; height: 17px; fill: none; stroke: var(--ink);
+  stroke-width: 2.6; stroke-linecap: round;
+  transition: transform .22s cubic-bezier(.3, .6, .35, 1);
+}
+.new-fab:hover { border-color: #cfd6ea; background: #f7f8fc; box-shadow: 0 2px 8px rgba(20,26,48,.08); }
+.new-fab.open { background: #f0f3ff; border-color: #b9c4f5; }
+.new-fab.open svg { transform: rotate(45deg); }
+
+.new-menu {
+  position: absolute; right: 0; top: 42px; z-index: 60;
+  min-width: 176px; padding: 5px;
+  background: #fff; border: 1px solid var(--line); border-radius: 11px;
+  box-shadow: 0 14px 34px rgba(20, 26, 48, .16), 0 2px 6px rgba(20, 26, 48, .06);
+}
+.new-item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 10px; border-radius: 8px; font-size: 12.5px; cursor: pointer;
+  transition: background .14s;
+}
+.new-item:hover { background: #f3f5fd; }
+.ni-ic { font-style: normal; font-size: 13px; width: 16px; text-align: center; }
+.new-sep { height: 1px; background: var(--line); margin: 4px 2px; }
+.new-pop-enter-active { transition: opacity .16s ease, transform .18s cubic-bezier(.3, .6, .35, 1); }
+.new-pop-leave-active { transition: opacity .1s ease, transform .1s ease; }
+.new-pop-enter-from, .new-pop-leave-to { opacity: 0; transform: translateY(-6px) scale(.97); }
+
+/* ---------- 进入主页的显化动画 ----------
+   显形要慢到能看见：整页从浓雾里一层层浮出来，约 1.2 秒。
+   起点 0.15、模糊 14px —— 一开始只是隐约轮廓，然后逐步收紧、减雾、落定。
+
+   曲线教训：cubic-bezier(.16,.72,...) 这类「前段极快」的曲线，会让进度在
+   中段就冲到顶然后停住 —— 实测 opacity 卡在 0.46 不动了 260ms，看着像卡顿。
+   改成分段均匀的关键帧 + 温和曲线，全程都在变化。 */
+.shell.entering { animation: shell-rise 1.2s cubic-bezier(.3, .55, .4, .95) both; }
+@keyframes shell-rise {
+  0%   { opacity: .15; filter: blur(14px)  saturate(.75); transform: scale(1.022); }
+  20%  { opacity: .34; filter: blur(10.5px) saturate(.82); transform: scale(1.017); }
+  40%  { opacity: .55; filter: blur(7px)   saturate(.88); transform: scale(1.012); }
+  60%  { opacity: .74; filter: blur(4.2px) saturate(.93); transform: scale(1.007); }
+  80%  { opacity: .90; filter: blur(1.9px) saturate(.97); transform: scale(1.003); }
+  100% { opacity: 1;   filter: blur(0)     saturate(1);    transform: scale(1); }
+}
+/* 侧栏与主区各自错开一点，让显形有「层层展开」的层次，不是一块雾整体散开 */
+.side.intro-side { animation: side-rise .85s cubic-bezier(.3, .55, .4, .95) .05s both; }
+@keyframes side-rise {
+  0%   { opacity: 0;    transform: translateX(-16px); }
+  100% { opacity: 1;    transform: none; }
+}
+.main.intro-main { animation: main-rise .92s cubic-bezier(.3, .55, .4, .95) .16s both; }
+@keyframes main-rise {
+  0%   { opacity: 0;   transform: translateY(14px); }
+  100% { opacity: 1;   transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell.entering, .side.intro-side, .main.intro-main { animation: none; }
+}
 
 .side {
   width: 236px; flex-shrink: 0; background: #fff; border-right: 1px solid var(--line);

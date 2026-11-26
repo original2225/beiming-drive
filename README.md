@@ -28,6 +28,12 @@
 |---|---|
 | ![重命名](docs/screenshots/14-rename-dialog.png) | ![确认](docs/screenshots/11-confirm-dialog.png) |
 
+**右侧竖栏与新建菜单** —— 竖栏收起只占 62px，鼠标移进去才提示可打开；顶栏的十字按钮点开是四种新建方式：
+
+| 竖栏（收起 / 展开） | 新建菜单 |
+|---|---|
+| ![竖栏收起](docs/screenshots/15-rail-collapsed.png) ![竖栏展开](docs/screenshots/16-rail-expanded.png) | ![新建菜单](docs/screenshots/17-new-menu.png) |
+
 **专属下载器** —— 服务端多线程分段，任务跑在服务器上，人关掉浏览器也继续下：
 
 ![下载器](docs/screenshots/07-downloader.png)
@@ -151,6 +157,8 @@ cd frontend && npm run dev    # 5174，代理到 8140
 | **移动** | 目录选择器，拒绝成环与重名，子树 path 级联（3 层实测） |
 | **在线预览** | 图片/视频/音频/PDF/文本，Range 支持拖动进度条，html/svg 拒绝内联 |
 | **右键菜单** | 行上右键给该条目的操作，空白处右键给上传/新建/刷新；贴边自动翻转 |
+| **顶栏新建菜单** | 圆角方框 + 十字，展开后可上传文件、上传文件夹（按目录结构逐级落位）、新建文件夹、新建 README |
+| **右侧竖栏** | 收起时只有头像与放大镜，展开后有账号信息/存储/设置/主题/切换账号/退出，底部胶囊搜索框 |
 
 ## 目录结构
 

@@ -77,10 +77,14 @@ export const api = {
   purge: (id) => request(`/files/${id}/purge`, { method: 'DELETE' }),
   trashList: () => request('/files/trash'),
 
+  /** 小文件直传。
+   *  parentId 为空时**不要拼进 URL** —— 拼成 `parentId=null` 会被后端当字符串
+   *  解析成 Long 而报 NumberFormatException（表面是 500）。省略即落根目录。 */
   uploadSmall: (parentId, file) => {
     const fd = new FormData();
     fd.append('file', file);
-    return request(`/files/upload?parentId=${parentId}`, { method: 'POST', body: fd });
+    const q = parentId != null ? `?parentId=${parentId}` : '';
+    return request(`/files/upload${q}`, { method: 'POST', body: fd });
   },
 
   // --- 分片上传 ---
