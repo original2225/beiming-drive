@@ -89,7 +89,7 @@
         <p v-else>这里还空着，上传文件或新建文件夹</p>
       </div>
 
-      <div v-else class="list">
+      <div v-else class="list" @contextmenu.self.prevent="openCtx(null, $event)">
         <div class="thead">
           <div class="th th-name-group" @click="setSort('name')">
             <span class="th-icon-inline"></span>
@@ -105,7 +105,9 @@
           </div>
           <div class="th th-ops">操作</div>
         </div>
-        <div v-for="it in items" :key="it.id" class="row" @click="onItemClick(it)">
+        <div v-for="it in items" :key="it.id" class="row" @click="onItemClick(it)"
+             :class="{ 'ctx-target': ctxMenu && ctxMenu.node && ctxMenu.node.id === it.id }"
+             @contextmenu.prevent.stop="openCtx(it, $event)">
           <div class="row-icon">{{ it.kind === 'dir' ? '📁' : fileIcon(it.name) }}</div>
           <div class="row-name" :title="it.name">{{ it.name }}</div>
           <div class="row-path muted" v-if="searching" :title="parentPathOf(it.path)">
@@ -151,6 +153,79 @@
     </main>
 
     <input ref="fileInput" type="file" multiple hidden @change="onPick" />
+
+    <!-- 右键菜单：定位到鼠标处，超出视口自动翻转 -->
+    <div v-if="ctxMenu" ref="ctxEl" class="ctx-menu" :style="ctxStyle" @click.stop>
+      <!-- 右键点在某个条目上：ctxMenu.node 有值 -->
+      <template v-if="ctxMenu.node">
+        <template v-if="view === 'trash'">
+          <div class="ctx-item" @click="ctxDo(restore)">恢复</div>
+          <div class="ctx-sep"></div>
+          <div class="ctx-item danger" @click="ctxDo(purge)">彻底删除</div>
+        </template>
+        <template v-else>
+          <div v-if="ctxMenu.node.kind === 'dir'" class="ctx-item"
+               @click="ctxDo(enterDir)">打开</div>
+          <template v-else>
+            <div v-if="canPreview(ctxMenu.node)" class="ctx-item" @click="ctxDo(preview)">在线预览</div>
+            <div class="ctx-item" @click="ctxDo(download)">下载</div>
+          </template>
+          <div class="ctx-item" @click="ctxDo(share)">分享…</div>
+          <div class="ctx-sep"></div>
+          <div class="ctx-item" @click="ctxDo(doRename)">重命名</div>
+          <div class="ctx-item" @click="ctxDo(openMove)">移动到…</div>
+          <div class="ctx-sep"></div>
+          <div class="ctx-item danger" @click="ctxDo(remove)">移入回收站</div>
+        </template>
+      </template>
+
+      <!-- 空白处右键 -->
+      <template v-else>
+        <div class="ctx-item" @click="ctxDo(() => fileInput.click())">上传文件</div>
+        <div class="ctx-item" @click="ctxDo(newFolder)">新建文件夹</div>
+        <div class="ctx-sep"></div>
+        <div class="ctx-item" @click="ctxDo(refresh)">刷新</div>
+      </template>
+      <div class="ctx-sep"></div>
+      <div class="ctx-item" @click="ctxMenu = null">取消</div>
+    </div>
+
+    <!-- 轻提示：替代原生 alert（原生会阻塞页面） -->
+    <transition name="toast">
+      <div v-if="toast" class="toast" :class="toast.kind">{{ toast.text }}</div>
+    </transition>
+
+    <!-- 通用输入框（替代原生 prompt）：改名 / 新建文件夹共用 -->
+    <div v-if="promptBox" class="mask" @click.self="closePrompt">
+      <div class="modal modal-sm">
+        <h3>{{ promptBox.title }}</h3>
+        <p v-if="promptBox.hint" class="muted tip-line">{{ promptBox.hint }}</p>
+        <input ref="promptInput" class="input" type="text" v-model="promptBox.value"
+               :placeholder="promptBox.placeholder"
+               @keydown.enter.prevent="doPrompt"
+               @keydown.esc.prevent="closePrompt" />
+        <p v-if="promptBox.err" class="err-line">{{ promptBox.err }}</p>
+        <div class="modal-foot">
+          <button class="btn" @click="closePrompt">取消</button>
+          <button class="btn btn-primary" :disabled="promptBox.busy" @click="doPrompt">
+            {{ promptBox.busy ? '处理中…' : promptBox.okText }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 通用确认框（替代原生 confirm） -->
+    <div v-if="confirmBox" class="mask" @click.self="confirmBox = null">
+      <div class="modal modal-sm">
+        <h3>{{ confirmBox.title }}</h3>
+        <p class="tip-line">{{ confirmBox.text }}</p>
+        <div class="modal-foot">
+          <button class="btn" @click="confirmBox = null">取消</button>
+          <button class="btn" :class="confirmBox.danger ? 'btn-danger' : 'btn-primary'"
+                  @click="runConfirm">{{ confirmBox.okText }}</button>
+        </div>
+      </div>
+    </div>
 
     <div v-if="shareBox" class="mask" @click.self="shareBox = null">
       <div class="modal">
@@ -230,7 +305,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, setToken, downloadUrl, previewUrl } from '../api.js'
 
@@ -248,6 +323,18 @@ const shareBox = ref(null)
 const moveBox = ref(null)
 const previewBox = ref(null)
 const menuFor = ref(null)
+// 右键菜单：ctxMenu = { node, x, y }，node 为空表示在空白处右键
+const ctxMenu = ref(null)
+const ctxEl = ref(null)
+const ctxStyle = ref({})
+// 通用输入框：{ title, hint, value, placeholder, okText, busy, err, submit }
+const promptBox = ref(null)
+const promptInput = ref(null)
+// 通用确认框：{ title, text, okText, danger, run }
+const confirmBox = ref(null)
+// 轻提示（替代 alert）
+const toast = ref(null)
+let toastTimer = 0
 const fileInput = ref(null)
 
 const keyword = ref('')
@@ -373,6 +460,39 @@ function onItemClick(it) {
   if (it.kind === 'dir') open(it)
 }
 
+// ---------- 右键菜单 ----------
+async function openCtx(node, ev) {
+  menuFor.value = null
+  // 先记坐标，等 DOM 出来再量尺寸决定是否翻转到鼠标左上
+  ctxMenu.value = { node, x: ev.clientX, y: ev.clientY }
+  await nextTick()
+  const el = ctxEl.value
+  if (!el) return
+  const r = el.getBoundingClientRect()
+  let x = ev.clientX, y = ev.clientY
+  // 贴边时翻到另一侧，否则菜单会出框看不见
+  if (x + r.width > window.innerWidth - 8) x = Math.max(8, ev.clientX - r.width)
+  if (y + r.height > window.innerHeight - 8) y = Math.max(8, ev.clientY - r.height)
+  ctxStyle.value = { left: x + 'px', top: y + 'px' }
+}
+
+/** 点了菜单项：先关菜单，再执行动作。有 node 就传进去，没有就无参调用。 */
+function ctxDo(fn) {
+  const node = ctxMenu.value?.node
+  ctxMenu.value = null
+  if (node) fn(node)
+  else fn()
+}
+
+function enterDir(it) { open(it) }
+
+function closeCtx(e) {
+  if (!ctxMenu.value) return
+  // 点在菜单内部不关（交给 ctx-item 自己处理）
+  if (e && e.target && e.target.closest && e.target.closest('.ctx-menu')) return
+  ctxMenu.value = null
+}
+
 function setSort(key) {
   if (orderBy.value === key) dir.value = dir.value === 'asc' ? 'desc' : 'asc'
   else { orderBy.value = key; dir.value = 'asc' }
@@ -403,10 +523,63 @@ function clearSearch() {
 }
 
 async function newFolder() {
-  const name = prompt('文件夹名称')
-  if (!name || !name.trim()) return
-  try { await api.mkdir(currentId.value, name.trim()); await refresh() }
-  catch (e) { alert(e.message) }
+  openPrompt({
+    title: '新建文件夹',
+    placeholder: '文件夹名称',
+    okText: '创建',
+    value: '',
+    submit: async (name) => {
+      await api.mkdir(currentId.value, name)
+      await refresh()
+    },
+  })
+}
+
+/** 轻提示：2.6 秒后自动消失，不阻塞页面 */
+function showToast(text, kind = 'info') {
+  toast.value = { text, kind }
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toast.value = null }, 2600)
+}
+
+// ---------- 通用输入框 / 确认框 ----------
+function openPrompt(cfg) {
+  promptBox.value = { hint: '', placeholder: '', okText: '确定', busy: false, err: '', ...cfg }
+  nextTick(() => promptInput.value && promptInput.value.focus())
+}
+
+function closePrompt() {
+  if (promptBox.value && promptBox.value.busy) return
+  promptBox.value = null
+}
+
+async function doPrompt() {
+  const b = promptBox.value
+  if (!b || b.busy) return
+  const v = (b.value || '').trim()
+  // 名字类校验放在这里统一做，比每个调用点各写一遍靠谱
+  if (!v) { b.err = '不能为空'; return }
+  if (/[\\/:*?"<>|]/.test(v)) { b.err = '不能包含 / \\ : * ? " < > |'; return }
+  if (v.length > 120) { b.err = '名字太长（最多 120 字）'; return }
+  b.err = ''
+  b.busy = true
+  try {
+    await b.submit(v)
+    promptBox.value = null
+  } catch (e) {
+    b.err = e.message || '操作失败'
+    b.busy = false
+  }
+}
+
+/** 确认框：run 返回 Promise 就等它，抛错就提示 */
+function askConfirm(cfg) { confirmBox.value = { okText: '确定', danger: false, ...cfg } }
+
+async function runConfirm() {
+  const c = confirmBox.value
+  if (!c) return
+  confirmBox.value = null
+  try { await c.run() } catch (e) { showToast(e.message || '操作失败', 'err') }
 }
 
 function pickUpload() { fileInput.value?.click() }
@@ -459,17 +632,33 @@ function toggleMenu(it) { menuFor.value = menuFor.value === it.id ? null : it.id
 
 async function doRename(it) {
   menuFor.value = null
-  const name = prompt('新名称', it.name)
-  if (!name || name === it.name) return
-  try { await api.rename(it.id, name.trim()); await refresh() }
-  catch (e) { alert(e.message) }
+  ctxMenu.value = null
+  openPrompt({
+    title: '重命名',
+    hint: `原名称：${it.name}`,
+    value: it.name,
+    okText: '保存',
+    submit: async (name) => {
+      if (name === it.name) return
+      await api.rename(it.id, name)
+      await refresh()
+    },
+  })
 }
 
 async function remove(it) {
   menuFor.value = null
-  if (!confirm(`把「${it.name}」移入回收站？`)) return
-  try { await api.trash(it.id); await refresh() }
-  catch (e) { alert(e.message) }
+  ctxMenu.value = null
+  askConfirm({
+    title: '移入回收站',
+    text: `把「${it.name}」移入回收站？之后可以在回收站里恢复。`,
+    okText: '移入回收站',
+    danger: true,
+    run: async () => {
+      await api.trash(it.id)
+      await refresh()
+    },
+  })
 }
 
 // ---------- 移动 ----------
@@ -515,7 +704,7 @@ async function doMove() {
     await api.move(box.node.id, box.targetId)
     moveBox.value = null
     await refresh()
-  } catch (e) { alert(e.message) }
+  } catch (e) { showToast(e.message, 'err') }
 }
 
 // ---------- 预览 ----------
@@ -535,7 +724,7 @@ function canPreview(it) { return it.kind === 'file' && previewKind(it.name, it.m
 async function preview(it) {
   menuFor.value = null
   const kind = previewKind(it.name, it.mime)
-  if (!kind) { alert('这种文件不支持在线预览'); return }
+  if (!kind) { showToast('这种文件不支持在线预览', 'err'); return }
   const url = previewUrl(it.id)
 
   if (kind === 'text') {
@@ -549,21 +738,30 @@ async function preview(it) {
         text: text.length > MAX
           ? text.slice(0, MAX) + `\n\n…（已截断，全文 ${text.length} 字符，请下载查看）`
           : text }
-    } catch (e) { alert('读取失败：' + e.message) }
+    } catch (e) { showToast('读取失败：' + e.message, 'err') }
     return
   }
   previewBox.value = { node: it, kind, url }
 }
 
 async function restore(it) {
-  try { await api.restore(it.id); await openTrash() }
-  catch (e) { alert(e.message) }
+  ctxMenu.value = null
+  try { await api.restore(it.id); await openTrash(); showToast('已恢复') }
+  catch (e) { showToast(e.message, 'err') }
 }
 
-async function purge(it) {
-  if (!confirm(`彻底删除「${it.name}」？此操作不可恢复`)) return
-  try { await api.purge(it.id); await openTrash() }
-  catch (e) { alert(e.message) }
+function purge(it) {
+  ctxMenu.value = null
+  askConfirm({
+    title: '彻底删除',
+    text: `「${it.name}」将被永久删除，无法恢复。确定吗？`,
+    okText: '彻底删除',
+    danger: true,
+    run: async () => {
+      await api.purge(it.id)
+      await openTrash()
+    },
+  })
 }
 
 function share(it) {
@@ -574,9 +772,9 @@ async function doShare() {
   try {
     const r = await api.createShare(s.node.id, s.password || null, s.hours || null, null)
     s.result = `${location.origin}/s/${r.share.id}`
-  } catch (e) { alert(e.message) }
+  } catch (e) { showToast(e.message, 'err') }
 }
-function copy(txt) { navigator.clipboard.writeText(txt).then(() => alert('已复制')) }
+function copy(txt) { navigator.clipboard.writeText(txt).then(() => showToast('已复制')) }
 
 async function logout() {
   try { await api.logout() } catch (e) {}
@@ -588,8 +786,34 @@ function closeMenu(e) {
   if (!e.target.closest || !e.target.closest('.more-wrap')) menuFor.value = null
 }
 
-onMounted(() => { refresh(); document.addEventListener('click', closeMenu) })
-onUnmounted(() => document.removeEventListener('click', closeMenu))
+/** Esc 逐层关闭：右键菜单 → ⋯ 菜单 → 预览 → 移动框 */
+function onKey(e) {
+  if (e.key !== 'Escape') return
+  if (promptBox.value) { closePrompt(); return }
+  if (confirmBox.value) { confirmBox.value = null; return }
+  if (ctxMenu.value) { ctxMenu.value = null; return }
+  if (menuFor.value) { menuFor.value = null; return }
+  if (previewBox.value) { previewBox.value = null; return }
+  if (moveBox.value) { moveBox.value = null }
+}
+
+onMounted(() => {
+  refresh()
+  document.addEventListener('click', closeMenu)
+  document.addEventListener('click', closeCtx)
+  // 右键用 capture 阶段：先关掉旧菜单，再让目标自己的 handler 打开新菜单。
+  // 用冒泡会被自己关掉（新菜单刚设上就被这个监听清空）——踩过。
+  document.addEventListener('contextmenu', closeCtx, true)
+  document.addEventListener('scroll', closeCtx, true)
+  document.addEventListener('keydown', onKey)
+})
+onUnmounted(() => {
+  document.removeEventListener('click', closeMenu)
+  document.removeEventListener('click', closeCtx)
+  document.removeEventListener('contextmenu', closeCtx, true)
+  document.removeEventListener('scroll', closeCtx, true)
+  document.removeEventListener('keydown', onKey)
+})
 </script>
 
 <style scoped>
@@ -751,6 +975,32 @@ onUnmounted(() => document.removeEventListener('click', closeMenu))
 .menu-item.danger:hover { background: #fff5f4; }
 .menu-sep { height: 1px; background: var(--line); margin: 4px 0; }
 
+/* ---------- 右键菜单 ---------- */
+.ctx-menu {
+  position: fixed; z-index: 900; min-width: 168px;
+  background: #fff; border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(20, 26, 48, .16), 0 2px 6px rgba(20, 26, 48, .06);
+  padding: 5px; font-size: 12.5px; user-select: none;
+  animation: ctx-in .09s ease-out;
+}
+@keyframes ctx-in {
+  from { opacity: 0; transform: scale(.96) translateY(-2px); }
+  to   { opacity: 1; transform: none; }
+}
+.ctx-item {
+  padding: 7px 11px; border-radius: 7px; cursor: pointer;
+  display: flex; align-items: center; gap: 6px;
+}
+.ctx-item:hover { background: #f2f4fb; }
+.ctx-item.danger { color: var(--danger); }
+.ctx-item.danger:hover { background: #fff5f4; }
+.ctx-item.off { opacity: .4; cursor: default; }
+.ctx-item.off:hover { background: transparent; }
+.ctx-sep { height: 1px; background: var(--line); margin: 4px 2px; }
+
+/* 右键选中的那一行给个底色，让人知道菜单作用在谁身上 */
+.row.ctx-target { background: #f0f3ff; }
+
 /* ---------- 移动对话框 ---------- */
 .mask.darker { background: rgba(10, 14, 24, .72); }
 .move-tip { font-size: 12.5px; margin: -6px 0 10px; }
@@ -831,6 +1081,22 @@ onUnmounted(() => document.removeEventListener('click', closeMenu))
 .modal label { display: block; margin-bottom: 13px; }
 .modal label span { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: 6px; }
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.modal-sm { width: 340px; }
+.modal-sm h3 { margin-bottom: 10px; }
+.tip-line { font-size: 12.5px; color: var(--ink-2); margin: 0 0 12px; line-height: 1.6; }
+.err-line { font-size: 12px; color: var(--danger); margin: 8px 0 0; }
+
+/* 轻提示 */
+.toast {
+  position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%);
+  z-index: 2000; padding: 10px 18px; border-radius: 9px; font-size: 13px;
+  background: #2b3144; color: #fff; box-shadow: 0 10px 28px rgba(16, 20, 40, .26);
+  max-width: 420px; text-align: center; pointer-events: none;
+}
+.toast.err { background: #c0392b; }
+.toast.ok { background: #1f8a55; }
+.toast-enter-active, .toast-leave-active { transition: opacity .18s, transform .18s; }
+.toast-enter-from, .toast-leave-to { opacity: 0; transform: translateX(-50%) translateY(8px); }
 .share-out { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--line); }
 .link-row { display: flex; gap: 8px; }
 .tip { font-size: 11.5px; margin: 8px 0 0; }

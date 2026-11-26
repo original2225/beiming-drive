@@ -16,6 +16,18 @@
 |---|---|
 | ![预览](docs/screenshots/05-preview.png) | ![移动](docs/screenshots/06-move.png) |
 
+**右键菜单** —— 行上右键给这条目的操作，空白处右键给上传/新建/刷新：
+
+| 文件行 | 空白处 |
+|---|---|
+| ![右键文件](docs/screenshots/08-context-menu.png) | ![右键空白](docs/screenshots/13-context-blank.png) |
+
+改名和删除都是自己画的对话框，不用浏览器原生弹窗——原生的没法校验，也压不了样式：
+
+| 重命名 | 移入回收站 |
+|---|---|
+| ![重命名](docs/screenshots/14-rename-dialog.png) | ![确认](docs/screenshots/11-confirm-dialog.png) |
+
 **专属下载器** —— 服务端多线程分段，任务跑在服务器上，人关掉浏览器也继续下：
 
 ![下载器](docs/screenshots/07-downloader.png)
@@ -138,6 +150,7 @@ cd frontend && npm run dev    # 5174，代理到 8140
 | 排序 | name / size / updatedAt，升降序，文件夹恒在前 |
 | **移动** | 目录选择器，拒绝成环与重名，子树 path 级联（3 层实测） |
 | **在线预览** | 图片/视频/音频/PDF/文本，Range 支持拖动进度条，html/svg 拒绝内联 |
+| **右键菜单** | 行上右键给该条目的操作，空白处右键给上传/新建/刷新；贴边自动翻转 |
 
 ## 目录结构
 
