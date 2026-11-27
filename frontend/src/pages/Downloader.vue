@@ -44,7 +44,14 @@
         </div>
       </div>
 
-      <div v-else-if="jobs.length === 0" class="empty">还没有任务，贴个链接开始吧</div>
+      <!-- 空状态也做成一块有形的卡片，而不是一行字飘在空白里：
+       上面全是圆角白卡片，这里突然什么都没有，整页看着像没加载完。
+       虚线边框沿用「这里可以放东西」的语义，不抢主视线。 -->
+      <div v-else-if="jobs.length === 0" class="empty card">
+        <div class="empty-icon">⤓</div>
+        <p class="empty-title">还没有任务</p>
+        <p class="empty-sub muted">贴个链接，开始把它搬进网盘</p>
+      </div>
 
       <div v-else class="jobs fade-in">
         <div v-for="j in jobs" :key="j.id" class="job card">
@@ -196,6 +203,24 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 .job-in { height: 100%; background: linear-gradient(90deg, var(--brand), #8b9bff); transition: .3s; }
 .job-err { font-size: 12.5px; color: var(--danger); margin-top: 7px; }
 .job-ops { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* ---- 空状态 ----
+   和任务卡片同一套圆角白底，这样「没有任务」和「有任务」是同一个视觉层级，
+   而不是一块卡片区突然变成一行灰字。虚线是因为它装的是「这里可以放东西」，
+   用虚线比实线更贴切，也不至于跟真实任务卡片抢注意力。 */
+.empty {
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center; padding: 52px 24px 46px;
+  /* .card 只给了背景和圆角、没有边框，所以这里要连宽度一起给，
+     只写 border-style 是画不出来的 */
+  border: 1px dashed #cdd3e4; background: transparent;
+  box-shadow: none;
+}
+/* 图标和文字都不能太淡：空状态是这页唯一的内容，
+   糊成一团灰等于告诉用户「这页没做完」。 */
+.empty-icon { font-size: 32px; color: #9aa3bd; opacity: 1; line-height: 1; margin-bottom: 12px; }
+.empty-title { margin: 0; font-size: 15.5px; font-weight: 600; color: var(--ink); }
+.empty-sub { margin: 6px 0 0; font-size: 13.5px; color: var(--ink-2); }
 
 /* ---- 骨架屏 ----
    盒模型和真实任务行一致，数据回来后原地填满。 */
