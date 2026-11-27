@@ -154,28 +154,28 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 
 <style scoped>
 
-.head h2 { margin: 0; font-size: 20px; }
-.head p { margin: 5px 0 22px; font-size: 13px; }
+.head h2 { margin: 0; font-size: 21px; }
+.head p { margin: 7px 0 26px; font-size: 14px; }
 
-.panel { padding: 18px 20px; margin-bottom: 26px; }
+.panel { padding: 22px 24px; margin-bottom: 30px; }
 .row { display: flex; gap: 10px; }
 .grow { flex: 1; }
 .sel { width: 108px; flex-shrink: 0; }
-.hint { font-size: 12px; margin-top: 11px; }
+.hint { font-size: 13.5px; margin-top: 13px; line-height: 1.6; }
 .err { background: #fff5f4; color: var(--danger); border: 1px solid #ffd5d2;
-       padding: 9px 12px; border-radius: 9px; font-size: 12.5px; margin-top: 12px; }
+       padding: 9px 12px; border-radius: 9px; font-size: 13.5px; margin-top: 12px; }
 
-.list-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-.list-head h3 { margin: 0; font-size: 15px; }
+.list-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; margin-top: 4px; }
+.list-head h3 { margin: 0; font-size: 16.5px; }
 
 .jobs { display: flex; flex-direction: column; gap: 10px; }
-.job { display: flex; align-items: center; gap: 14px; padding: 14px 18px; }
+.job { display: flex; align-items: center; gap: 16px; padding: 17px 20px; }
 .job-main { flex: 1; min-width: 0; }
-.job-name { font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.job-meta { display: flex; align-items: center; gap: 9px; font-size: 11.5px; margin-top: 6px; flex-wrap: wrap; }
+.job-name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-meta { display: flex; align-items: center; gap: 9px; font-size: 12.5px; margin-top: 6px; flex-wrap: wrap; }
 .job-bar { height: 4px; background: #e6e8f0; border-radius: 3px; margin-top: 9px; overflow: hidden; }
 .job-in { height: 100%; background: linear-gradient(90deg, var(--brand), #8b9bff); transition: .3s; }
-.job-err { font-size: 11.5px; color: var(--danger); margin-top: 7px; }
+.job-err { font-size: 12.5px; color: var(--danger); margin-top: 7px; }
 .job-ops { display: flex; gap: 6px; flex-shrink: 0; }
 
 /* ---- 骨架屏 ----

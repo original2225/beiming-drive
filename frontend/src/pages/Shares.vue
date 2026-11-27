@@ -80,15 +80,15 @@ onMounted(() => {
 <style scoped>
 /* 布局骨架（.shell/.side/.main）已经搬到 AppShell 里，
    这里只留「内容区」自己的样式，避免三份重复定义互相打架。 */
-.page { padding: 26px 30px; }
-.page h2 { margin: 0; font-size: 20px; }
-.sub { margin: 5px 0 22px; font-size: 13px; }
+.page { padding: 30px 34px 46px; }
+.page h2 { margin: 0 0 6px; font-size: 21px; }
+.sub { margin: 5px 0 22px; font-size: 13.5px; }
 
 .rows { display: flex; flex-direction: column; gap: 10px; }
 .row { display: flex; align-items: center; gap: 14px; padding: 14px 18px; }
 .row-main { flex: 1; min-width: 0; }
-.row-link { font-size: 13.5px; font-weight: 600; font-family: ui-monospace, monospace; }
-.row-meta { font-size: 11.5px; margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+.row-link { font-size: 14px; font-weight: 600; font-family: ui-monospace, monospace; }
+.row-meta { font-size: 12.5px; margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
 .row-ops { display: flex; gap: 6px; }
 
 /* ---- 骨架屏 ----

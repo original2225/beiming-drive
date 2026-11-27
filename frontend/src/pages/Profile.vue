@@ -341,12 +341,12 @@ onMounted(async () => {
 <style scoped>
 .page {
   flex: 1; display: flex; flex-direction: column;
-  overflow-y: auto; padding: 26px 30px 44px; min-height: 0;
+  overflow-y: auto; padding: 30px 34px 48px; min-height: 0;
 }
 /* 宽屏下不让卡片拉得太宽：表单一行超过 700px 读起来要来回扫 */
 .page > * { max-width: 720px; width: 100%; }
-h2 { margin: 0 0 4px; font-size: 19px; font-weight: 600; color: var(--ink); }
-.sub { margin: 0 0 18px; font-size: 12.5px; }
+h2 { margin: 0 0 6px; font-size: 21px; font-weight: 600; color: var(--ink); }
+.sub { margin: 0 0 18px; font-size: 13.5px; }
 .muted { color: var(--ink-3); }
 .card {
   background: #fff; border: 1px solid var(--line); border-radius: 14px;
@@ -369,7 +369,7 @@ h2 { margin: 0 0 4px; font-size: 19px; font-weight: 600; color: var(--ink); }
 .ava-col { display: flex; flex-direction: column; align-items: center; gap: 5px; flex-shrink: 0; }
 .ava-link {
   border: 0; background: transparent; padding: 0; cursor: pointer;
-  font: inherit; font-size: 11px; color: var(--brand);
+  font: inherit; font-size: 11.5px; color: var(--brand);
   transition: color .15s ease;
 }
 .ava-link:hover { color: var(--brand-deep); text-decoration: underline; }
@@ -401,35 +401,35 @@ h2 { margin: 0 0 4px; font-size: 19px; font-weight: 600; color: var(--ink); }
   display: flex; align-items: center; gap: 8px;
 }
 .badge {
-  font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 6px;
+  font-size: 11.5px; font-weight: 600; padding: 2px 7px; border-radius: 6px;
   background: var(--brand-soft); color: var(--brand-deep);
 }
-.hero-mail { font-size: 12.5px; margin-top: 3px; }
-.hero-meta { font-size: 11.5px; margin-top: 5px; color: var(--ink-2); opacity: .85; }
+.hero-mail { font-size: 13.5px; margin-top: 3px; }
+.hero-meta { font-size: 12.5px; margin-top: 5px; color: var(--ink-2); opacity: .85; }
 
 
 /* ---------- 行 ---------- */
 .row-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.row-title { font-size: 13.5px; font-weight: 600; color: var(--ink); margin-bottom: 3px; }
-.row-desc { font-size: 11.5px; }
+.row-title { font-size: 14px; font-weight: 600; color: var(--ink); margin-bottom: 3px; }
+.row-desc { font-size: 12.5px; }
 .row-edit { display: flex; gap: 9px; align-items: center; }
 .ipt {
   flex: 1; min-width: 0; height: 36px; padding: 0 12px;
   border: 1px solid var(--line); border-radius: 9px; background: #fff;
-  font-size: 13px; color: var(--ink); outline: none;
+  font-size: 13.5px; color: var(--ink); outline: none;
   transition: border-color .16s, box-shadow .16s;
 }
 .ipt:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(91,108,255,.11); }
 .ro {
   height: 36px; display: flex; align-items: center; padding: 0 12px;
   background: #f7f8fc; border: 1px solid var(--line); border-radius: 9px;
-  font-size: 13px; color: var(--ink-2);
+  font-size: 13.5px; color: var(--ink-2);
 }
 
 
 .pw-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin-bottom: 12px; }
 .pw-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
-.msg { font-size: 12px; }
+.msg { font-size: 13px; }
 .msg.ok { color: #12946a; }
 .msg.err { color: #d64545; }
 
@@ -446,7 +446,7 @@ h2 { margin: 0 0 4px; font-size: 19px; font-weight: 600; color: var(--ink); }
   box-shadow: 0 22px 60px rgba(22,25,42,.22);
 }
 .dlg-title { font-size: 14.5px; font-weight: 600; color: var(--ink); margin-bottom: 7px; }
-.dlg-text { font-size: 12.5px; line-height: 1.6; margin-bottom: 16px; }
+.dlg-text { font-size: 13.5px; line-height: 1.6; margin-bottom: 16px; }
 .dlg-ops { display: flex; justify-content: flex-end; gap: 8px; }
 
 .dlg-enter-active, .dlg-leave-active { transition: opacity .16s ease; }
@@ -457,7 +457,7 @@ h2 { margin: 0 0 4px; font-size: 19px; font-weight: 600; color: var(--ink); }
 /* ---------- 轻提示 ---------- */
 .toast {
   position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%);
-  background: rgba(22,25,42,.9); color: #fff; font-size: 12.5px;
+  background: rgba(22,25,42,.9); color: #fff; font-size: 13.5px;
   padding: 9px 16px; border-radius: 9px; z-index: 70;
 }
 .toast-enter-active, .toast-leave-active { transition: opacity .18s ease, transform .18s ease; }

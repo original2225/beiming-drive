@@ -53,8 +53,11 @@
             <span class="muted">存储空间</span>
             <span class="quota-go">›</span>
           </div>
-          <div class="bar"><div class="bar-in" :style="{ width: barPct + '%' }"></div></div>
-          <div class="quota-num">{{ usedText }} / {{ quotaText }} · {{ pct }}%</div>
+          <div class="bar"><div class="bar-in" :style="{ width: Math.max(barPct, barPct > 0 ? 2 : 0) + '%' }"></div></div>
+          <div class="quota-num">
+            <span>已用 {{ usedText }} / {{ quotaText }}</span>
+            <span class="quota-pct">{{ pct }}%</span>
+          </div>
         </button>
       </div>
     </aside>
@@ -233,32 +236,35 @@ const pct = computed(() => {
   display: flex; flex-direction: column;
 }
 .side-brand {
-  display: flex; align-items: center; gap: 9px;
-  padding: 0 6px 16px; font-weight: 700; font-size: 15.5px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 6px 20px; font-weight: 700; font-size: 17.5px;
+  letter-spacing: -.1px;
 }
 .side-brand img { width: 30px; height: 30px; border-radius: 50%; }
 
-.new-btn {
+.new-btn { margin-top: 2px;
   width: 100%; margin-bottom: 16px;
   display: flex; align-items: center; justify-content: center; gap: 6px;
 }
-.new-btn .plus { font-size: 16px; line-height: 1; }
+.new-btn .plus { font-size: 17px; line-height: 1; }
 
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 
-.side-nav { display: flex; flex-direction: column; gap: 2px; }
+.side-nav { display: flex; flex-direction: column; gap: 4px; }
 .nav-item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 9px 11px; border-radius: 9px;
-  font-size: 13.5px; color: var(--ink-2); cursor: pointer;
+  display: flex; align-items: center; gap: 11px;
+  /* 行高比浮起：之前 padding 9px、项间 gap 2px，四项挤成一坨，读着累 */
+  padding: 11px 12px; border-radius: 10px;
+  font-size: 15px; color: var(--ink-2); cursor: pointer;
   transition: background .18s, color .18s;
   /* 高亮靠背景+颜色平滑过渡，不是一闪就换 */
 }
+.nav-item i { font-size: 16.5px; }
 .nav-item:hover { background: #f6f7fc; color: var(--ink); }
 .nav-item.on { background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
 .nav-item .ic { font-style: normal; width: 18px; text-align: center; }
 
-.side-foot { margin-top: auto; padding-top: 14px; }
+.side-foot { margin-top: auto; padding-top: 18px; }
 .user-btn {
   display: flex; align-items: center; gap: 9px; width: 100%;
   padding: 7px 6px; margin-bottom: 4px;
@@ -274,15 +280,15 @@ const pct = computed(() => {
   width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
   display: grid; place-items: center; overflow: hidden;
   background: linear-gradient(135deg, var(--brand), #7b5bf7);
-  color: #fff; font-size: 13px; font-weight: 600;
+  color: #fff; font-size: 14.5px; font-weight: 600;
 }
 .user-ava > img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .user-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .user-name {
-  font-size: 12.5px; color: var(--ink); font-weight: 550;
+  font-size: 14px; color: var(--ink); font-weight: 550;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.user-sub { font-size: 10.5px; color: var(--ink-3); margin-top: 1px; }
+.user-sub { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
 .user-btn:hover .quota-go { opacity: 1; transform: translateX(0); }
 
 .quota {
@@ -299,11 +305,17 @@ const pct = computed(() => {
   color: var(--ink-3); font-size: 13px;
 }
 .quota:hover .quota-go { opacity: 1; transform: translateX(0); }
-.quota-top { display: flex; justify-content: space-between; font-size: 11.5px; margin-bottom: 6px; }
-.bar { height: 5px; border-radius: 3px; background: #eef0f7; overflow: hidden; }
+.quota-top { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 8px; }
+.bar { height: 6px; border-radius: 3px; background: #eef0f7; overflow: hidden; }
 .bar-in { height: 100%; border-radius: 3px; background: linear-gradient(90deg, #5b76f7, #7b5bf7);
           transition: width .5s cubic-bezier(.3,.55,.4,.95); }
-.quota-num { font-size: 10.5px; color: var(--ink-3); margin-top: 5px; }
+.quota-num {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12px; color: var(--ink-2); margin-top: 7px;
+  font-variant-numeric: tabular-nums;
+}
+/* 百分比单独一点强调：数值行之前斜杠+中点全糊在一起，扫不出来 */
+.quota-pct { font-weight: 600; color: var(--brand-deep); }
 
 /* ===== 内容区过渡（侧栏不参与）=====
  * 离场 0.16s 短于入场 0.26s：两段尾巴重叠，避免出现「两边都不存在」的空白帧。

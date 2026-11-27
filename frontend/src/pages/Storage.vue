@@ -219,11 +219,11 @@ onMounted(async () => {
 <style scoped>
 .page {
   flex: 1; display: flex; flex-direction: column;
-  overflow-y: auto; padding: 26px 30px 40px; min-height: 0;
+  overflow-y: auto; padding: 30px 34px 46px; min-height: 0;
 }
 .page > * { max-width: 760px; width: 100%; }
-h2 { margin: 0 0 4px; font-size: 19px; font-weight: 600; color: var(--ink); }
-.sub { margin: 0 0 18px; font-size: 12.5px; }
+h2 { margin: 0 0 6px; font-size: 21px; font-weight: 600; color: var(--ink); }
+.sub { margin: 0 0 18px; font-size: 13.5px; }
 .muted { color: var(--ink-3); }
 .card {
   background: #fff; border: 1px solid var(--line); border-radius: 14px;
@@ -232,9 +232,9 @@ h2 { margin: 0 0 4px; font-size: 19px; font-weight: 600; color: var(--ink); }
 
 /* ---------- 总览 ---------- */
 .head-top { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 14px; }
-.head-label { font-size: 12px; margin-bottom: 3px; }
+.head-label { font-size: 13px; margin-bottom: 3px; }
 .head-num { font-size: 26px; font-weight: 650; color: var(--ink); letter-spacing: -.3px; }
-.head-right { text-align: right; font-size: 12px; }
+.head-right { text-align: right; font-size: 13px; }
 .head-pct { font-size: 15px; font-weight: 600; color: var(--brand-deep); margin-top: 2px; }
 
 /* 配额条：单色，只回答「用了总量的百分之几」。
@@ -248,7 +248,7 @@ h2 { margin: 0 0 4px; font-size: 19px; font-weight: 600; color: var(--ink); }
   transition: width .5s cubic-bezier(.3,.7,.35,1);
 }
 
-.seg-title { font-size: 11.5px; margin: 14px 0 7px; }
+.seg-title { font-size: 12.5px; margin: 14px 0 7px; }
 
 /* 构成条：所有段首尾相接，圆角只在两端 */
 .seg {
@@ -260,11 +260,11 @@ h2 { margin: 0 0 4px; font-size: 19px; font-weight: 600; color: var(--ink); }
 
 .legend {
   display: flex; flex-wrap: wrap; gap: 6px 16px;
-  margin-top: 13px; font-size: 11.5px; color: var(--ink-2);
+  margin-top: 13px; font-size: 12.5px; color: var(--ink-2);
 }
 .lg { display: inline-flex; align-items: center; gap: 5px; }
 .lg b { font-weight: 600; color: var(--ink); }
-.lg-pct { color: var(--ink-3); font-size: 10.5px; }
+.lg-pct { color: var(--ink-3); font-size: 11.5px; }
 
 .dot {
   width: 8px; height: 8px; border-radius: 3px;
@@ -286,7 +286,7 @@ h2 { margin: 0 0 4px; font-size: 19px; font-weight: 600; color: var(--ink); }
 .list { padding-bottom: 8px; }
 .list-head {
   display: flex; justify-content: space-between;
-  font-size: 12px; font-weight: 600; color: var(--ink-2);
+  font-size: 13px; font-weight: 600; color: var(--ink-2);
   padding-bottom: 10px; border-bottom: 1px solid var(--line); margin-bottom: 4px;
 }
 .item {
@@ -295,16 +295,16 @@ h2 { margin: 0 0 4px; font-size: 19px; font-weight: 600; color: var(--ink); }
 }
 .item:last-child { border-bottom: 0; }
 .item-main { flex: 1; min-width: 0; }
-.item-name { font-size: 13px; color: var(--ink); margin-bottom: 6px; }
+.item-name { font-size: 13.5px; color: var(--ink); margin-bottom: 6px; }
 .item-bar { height: 5px; border-radius: 3px; background: #f0f2f8; overflow: hidden; }
 .item-bar-in { height: 100%; border-radius: 3px; transition: width .5s cubic-bezier(.3,.7,.35,1); }
-.item-num { text-align: right; min-width: 88px; font-size: 12px; }
+.item-num { text-align: right; min-width: 88px; font-size: 13px; }
 .item-num b { display: block; font-weight: 600; color: var(--ink); }
-.item-num span { font-size: 11px; }
-.item-hint { font-size: 11.5px; }
+.item-num span { font-size: 11.5px; }
+.item-hint { font-size: 12.5px; }
 
 .trash-divider {
-  font-size: 11px; padding: 12px 2px 6px;
+  font-size: 11.5px; padding: 12px 2px 6px;
   border-top: 1px solid var(--line); margin-top: 6px;
 }
 .trash-item { padding-top: 8px; }
@@ -320,16 +320,16 @@ h2 { margin: 0 0 4px; font-size: 19px; font-weight: 600; color: var(--ink); }
 .big-row:last-child { border-bottom: 0; }
 .big-row:hover { background: #f7f8fc; }
 .big-name {
-  flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink);
+  flex: 1; min-width: 0; font-size: 13.5px; color: var(--ink);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .big-size {
-  font-size: 12px; font-weight: 600; color: var(--ink-2);
+  font-size: 13px; font-weight: 600; color: var(--ink-2);
   font-variant-numeric: tabular-nums;
 }
 
 .empty {
-  padding: 34px 0; text-align: center; color: var(--ink-3); font-size: 12.5px;
+  padding: 34px 0; text-align: center; color: var(--ink-3); font-size: 13.5px;
 }
 /* 回收站只有几字节时用普通按钮，别用红色描边抢主视线 */
 .btn-quiet { color: var(--ink-2); }
