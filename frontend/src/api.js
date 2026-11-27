@@ -83,7 +83,10 @@ export const api = {
   trash: (id) => request(`/files/${id}`, { method: 'DELETE' }),
   restore: (id) => request(`/files/${id}/restore`, { method: 'POST' }),
   purge: (id) => request(`/files/${id}/purge`, { method: 'DELETE' }),
+  /** 清空回收站。返回 { purgedEntries, blobsReleased, freedBytes } */
+  emptyTrash: () => request('/files/trash', { method: 'DELETE' }),
   trashList: () => request('/files/trash'),
+  trashSummary: () => request('/files/trash/summary'),
 
   /** 小文件直传。
    *  parentId 为空时**不要拼进 URL** —— 拼成 `parentId=null` 会被后端当字符串

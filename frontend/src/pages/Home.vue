@@ -54,10 +54,15 @@
       <div class="bar-info">
         <span class="muted">
           <template v-if="searching">搜索「{{ searchKw }}」命中 {{ items.length }} 项</template>
-          <template v-else-if="view === 'trash'">回收站 {{ items.length }} 项</template>
+          <template v-else-if="view === 'trash'">
+            回收站 {{ items.length }} 项
+            <span class="trash-note">· 保留 {{ trashDays }} 天，过期自动清除</span>
+          </template>
           <template v-else>{{ items.length }} 项</template>
         </span>
         <div class="right-side">
+          <button v-if="view === 'trash' && items.length > 0" class="btn btn-sm btn-danger"
+                  @click="emptyTrash">清空回收站</button>
           <button v-if="searching" class="btn btn-sm" @click="clearSearch">返回目录</button>
         </div>
       </div>
@@ -71,7 +76,8 @@
         <p v-else>这里还空着，上传文件或新建文件夹</p>
       </div>
 
-      <div v-else class="list" @contextmenu.self.prevent="openCtx(null, $event)">
+      <div v-else class="list" :class="{ 'trash-view': view === 'trash' }"
+           @contextmenu.self.prevent="openCtx(null, $event)">
         <div class="thead">
           <div class="th th-name-group" @click="setSort('name')">
             <span class="th-icon-inline"></span>
@@ -83,7 +89,7 @@
             大小<i v-if="orderBy === 'size'">{{ dir === 'asc' ? '↑' : '↓' }}</i>
           </div>
           <div class="th th-time" @click="setSort('updatedAt')">
-            修改时间<i v-if="orderBy === 'updatedAt'">{{ dir === 'asc' ? '↑' : '↓' }}</i>
+            {{ view === 'trash' ? '剩余保留' : '修改时间' }}<i v-if="orderBy === 'updatedAt'">{{ dir === 'asc' ? '↑' : '↓' }}</i>
           </div>
           <div class="th th-ops">操作</div>
         </div>
@@ -97,7 +103,15 @@
           </div>
           <div class="row-type muted">{{ it.kind === 'dir' ? '文件夹' : extOf(it.name) }}</div>
           <div class="row-size muted">{{ it.kind === 'dir' ? '—' : sizeText(it.size) }}</div>
-          <div class="row-time muted">{{ fmtDate(it.updatedAt) }}</div>
+          <div class="row-time muted">
+            <template v-if="view === 'trash'">
+              <span :class="{ 'expiring': daysLeft(it) !== null && daysLeft(it) <= 3 }"
+                    :title="'移入回收站时间：' + fmtDate(it.trashedAt)">
+                {{ daysLeft(it) !== null ? daysLeft(it) + ' 天后清除' : fmtDate(it.updatedAt) }}
+              </span>
+            </template>
+            <template v-else>{{ fmtDate(it.updatedAt) }}</template>
+          </div>
           <div class="row-ops" @click.stop>
             <template v-if="view === 'trash'">
               <button class="btn btn-sm" @click="restore(it)">恢复</button>
@@ -301,6 +315,9 @@ const me = ref(null)
 const items = ref([])
 const loading = ref(false)
 const view = ref('files')
+/// 回收站保留天数。默认 30 只是占位，真正值由 /files/trash/summary 带回来 ——
+/// 写死在前端的话，后端改配置后界面上的说法就和实际清理行为对不上了。
+const trashDays = ref(30)
 const currentId = ref(null)
 const trail = ref([])
 const uploads = ref([])
@@ -515,6 +532,10 @@ async function openTrash() {
   loading.value = true
   try {
     items.value = await api.trashList()
+    // 保留天数从后端问，不写死在前端
+    api.trashSummary()
+      .then(s => { if (s && s.retentionDays) trashDays.value = s.retentionDays })
+      .catch(() => { /* 拿不到就用默认值，不影响列表展示 */ })
     await loadMe()
   } catch (e) {
     items.value = []
@@ -932,6 +953,32 @@ async function restore(it) {
   catch (e) { showToast(e.message, 'err') }
 }
 
+/// 清空回收站：一次删掉所有顶层条目，磁盘同步释放。
+/// 文案里不给「N 个文件」这种精确数 —— 回收站列表是顶层条目，
+/// 报条目数比报文件数更贴合用户眼前看到的东西。
+function emptyTrash() {
+  ctxMenu.value = null
+  askConfirm({
+    title: '清空回收站',
+    text: `回收站里的 ${items.value.length} 项将被永久删除，无法恢复。确定吗？`,
+    okText: '清空',
+    danger: true,
+    run: async () => {
+      const r = await api.emptyTrash()
+      await openTrash()
+      showToast(r.freedBytes > 0 ? `已清空，释放 ${sizeText(r.freedBytes)}` : '已清空')
+    },
+  })
+}
+
+/// 回收站里这一项还剩几天到期。trashedAt 由后端给，按保留天数倒计时。
+/// 只用日期差、不用精确到小时：用户关心的是「明天还是后天没」，不是几点几分。
+function daysLeft(it) {
+  if (!it.trashedAt) return null
+  const ms = trashDays.value * 86400000 - (Date.now() - new Date(it.trashedAt).getTime())
+  return Math.max(0, Math.ceil(ms / 86400000))
+}
+
 function purge(it) {
   ctxMenu.value = null
   askConfirm({
@@ -1221,6 +1268,11 @@ onUnmounted(() => {
 .row-type { flex: 0 0 56px; font-size: 12.5px; text-align: right; }
 .row-size { flex: 0 0 70px; font-size: 12.5px; text-align: right; }
 .row-time { flex: 0 0 78px; font-size: 12.5px; text-align: right; }
+/* 回收站那列显示的是「N 天后清除」，比日期串长，得放宽，
+   否则 78px 下会折成两行、把行高撑起来。
+   3 天内到期的标红提示一下，别让人一觉醒来文件没了还不知道为什么。 */
+.row-time .expiring { color: #d9483f; }
+.list.trash-view .row-time { flex: 0 0 104px; }
 /* 操作区不参与 flex 分配（绝对定位在右侧），改由 hover 覆盖，
    这样窄窗口下也不会把名称挤没。 */
 /* 操作列固定占位，避免和大小列视觉粘连；hover 才完全显形 */
