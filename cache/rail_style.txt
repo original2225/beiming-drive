@@ -1,0 +1,199 @@
+/* ================= 右侧竖栏 =================
+   收起时只占 62px：顶一个头像、底一个放大镜，中间是留白。
+   展开时宽到 268px，从右侧「向左推出」——用 width 过渡而不是 transform，
+   因为 transform 平移不会改变布局，会把主区内容盖住。 */
+.rail {
+  flex-shrink: 0;
+  width: 62px;
+  background: #fff;
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width .32s cubic-bezier(.3, .6, .35, 1);
+}
+.rail.open { width: 268px; }
+
+/* ---------- 收起态 ---------- */
+.rail-mini {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 0;
+  gap: 10px;
+}
+/* 头像和放大镜：悬停轻微放大 + 加深，给「这里能点」的反馈 */
+.mini-avatar, .mini-search {
+  width: 38px; height: 38px; border-radius: 50%;
+  display: grid; place-items: center; padding: 0;
+  border: 1px solid var(--line); background: #f7f8fc; color: var(--ink-2);
+  transition: transform .2s cubic-bezier(.3, .6, .35, 1), box-shadow .2s, background .2s, border-color .2s;
+}
+.mini-avatar span {
+  font-size: 15px; font-weight: 600; color: #fff; letter-spacing: .5px;
+}
+.mini-avatar {
+  background: linear-gradient(135deg, #5b76f7, #7b5bf7);
+  border-color: transparent;
+  overflow: hidden;
+}
+.mini-avatar > img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: inherit; }
+.mini-avatar:hover {
+  transform: scale(1.12);
+  box-shadow: 0 6px 18px rgba(91, 118, 247, .38);
+}
+.mini-search svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; }
+.mini-search:hover {
+  transform: scale(1.14);
+  border-color: #cfd6ea;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 4px 14px rgba(20, 26, 48, .12);
+}
+
+/* 中间的留白：平时是空的，鼠标进来才浮出「打开」提示 */
+.rail-gap {
+  flex: 1;
+  width: 100%;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  position: relative;
+}
+.gap-tip {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  opacity: 0; transform: translateX(-4px);
+  transition: opacity .22s ease, transform .22s ease;
+  color: var(--ink-3); font-size: 11.5px;
+}
+.rail-gap:hover .gap-tip { opacity: 1; transform: none; }
+.gap-tip em { font-style: normal; }
+.gap-arrow {
+  width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+/* 展开态从上往下滑入 */
+.rail-slide-enter-active { transition: opacity .24s ease .04s, transform .3s cubic-bezier(.3, .6, .35, 1); }
+.rail-slide-leave-active { transition: opacity .14s ease, transform .14s ease; }
+.rail-slide-enter-from { opacity: 0; transform: translateX(16px); }
+.rail-slide-leave-to { opacity: 0; transform: translateX(10px); }
+.rail-fade-leave-active { transition: opacity .12s ease; }
+.rail-fade-leave-to { opacity: 0; }
+
+/* ---------- 展开态 ---------- */
+.rail-full {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 14px 14px;
+  width: 268px;
+}
+.rail-head { display: flex; align-items: center; gap: 10px; padding: 2px 2px 12px; }
+.rail-avatar {
+  position: relative; overflow: hidden;
+  width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0;
+  display: grid; place-items: center; color: #fff; font-size: 16px; font-weight: 600;
+  background: linear-gradient(135deg, #5b76f7, #7b5bf7);
+  box-shadow: 0 3px 12px rgba(91, 118, 247, .3);
+  border: 0; padding: 0; cursor: pointer;
+  transition: box-shadow .2s, transform .2s;
+}
+.rail-avatar > img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.rail-avatar:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(91, 118, 247, .4); }
+
+/* 相机遮罩：平时透明，悬停或聚焦时浮出，让「能改」这件事看得见 */
+.avatar-cam {
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  background: rgba(20, 24, 40, .52);
+  opacity: 0; transition: opacity .18s;
+  pointer-events: none;
+}
+.avatar-cam svg {
+  width: 19px; height: 19px; fill: none;
+  stroke: #fff; stroke-width: 1.7; stroke-linejoin: round;
+}
+.rail-avatar:hover .avatar-cam,
+.rail-avatar:focus-visible .avatar-cam { opacity: 1; }
+/* 有图片时遮罩稍微淡一点，别盖住整张脸 */
+.rail-avatar.hasImg:hover .avatar-cam { opacity: .85; }
+
+/* 上传中：头像压暗 + 转圈 */
+.avatar-spin {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: rgba(255, 255, 255, .55);
+}
+.avatar-spin::after {
+  content: ''; position: absolute; inset: 50% auto auto 50%;
+  width: 16px; height: 16px; margin: -8px 0 0 -8px;
+  border: 2px solid rgba(91, 118, 247, .28);
+  border-top-color: #5b76f7; border-radius: 50%;
+  animation: avatar-spin .7s linear infinite;
+}
+@keyframes avatar-spin { to { transform: rotate(360deg); } }
+
+.avatar-input { display: none; }
+.rail-who { min-width: 0; flex: 1; }
+.rail-name { font-size: 14.5px; font-weight: 600; overflow: hidden;
+             text-overflow: ellipsis; white-space: nowrap; }
+.rail-mail { font-size: 11.5px; color: var(--ink-3); overflow: hidden;
+             text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+.rail-close {
+  width: 26px; height: 26px; border-radius: 7px; flex-shrink: 0;
+  border: 1px solid transparent; background: transparent; color: var(--ink-3);
+  display: grid; place-items: center; transition: .16s;
+}
+.rail-close svg { width: 15px; height: 15px; fill: none; stroke: currentColor;
+                  stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
+.rail-close:hover { background: #f2f4fb; border-color: var(--line); color: var(--ink); }
+
+.rail-quota { padding: 0 2px 12px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+.rail-quota-bar { height: 4px; border-radius: 3px; background: #eef0f7; overflow: hidden; }
+.rail-quota-bar > div { height: 100%; border-radius: 3px;
+                        background: linear-gradient(90deg, #5b76f7, #7b5bf7);
+                        transition: width .3s ease; }
+.rail-quota-num { font-size: 11.5px; color: var(--ink-3); margin-top: 6px; }
+
+.rail-nav { display: flex; flex-direction: column; gap: 2px; }
+.rail-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; border-radius: 9px; border: 0; background: transparent;
+  font-size: 14px; color: var(--ink-2); text-align: left; width: 100%;
+  transition: background .15s, color .15s;
+}
+.rail-item svg { width: 17px; height: 17px; flex-shrink: 0; fill: none;
+                 stroke: currentColor; stroke-width: 1.7;
+                 stroke-linecap: round; stroke-linejoin: round; }
+.rail-item:hover { background: #f3f5fd; color: var(--ink); }
+.rail-item.danger { color: var(--danger); }
+.rail-item.danger:hover { background: #fff5f4; }
+.rail-sep { height: 1px; background: var(--line); margin: 6px 2px; }
+
+/* 最下方：放大镜 + 胶囊搜索框 */
+.rail-search {
+  margin-top: auto;
+  display: flex; align-items: center; gap: 6px;
+  height: 38px; padding: 0 4px 0 10px;
+  border: 1px solid var(--line); border-radius: 999px; background: #f7f8fc;
+  transition: border-color .2s, background .2s, box-shadow .2s;
+}
+.rail-search:focus-within {
+  border-color: #b9c4f5; background: #fff;
+  box-shadow: 0 0 0 3px rgba(91, 118, 247, .12);
+}
+.rs-ic { width: 17px; height: 17px; flex-shrink: 0; fill: none;
+         stroke: var(--ink-3); stroke-width: 1.9; stroke-linecap: round; }
+.rail-search input {
+  flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
+  font-size: 14px; color: var(--ink); padding: 0;
+}
+.rail-search input::placeholder { color: var(--ink-3); }
+.rs-clear {
+  width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+  border: 0; background: #e6e9f3; color: var(--ink-2);
+  font-size: 14px; line-height: 1; display: grid; place-items: center;
+}
+.rs-clear:hover { background: #d8dcec; }

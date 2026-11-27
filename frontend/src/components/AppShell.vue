@@ -74,6 +74,12 @@
         </transition>
       </router-view>
     </main>
+
+    <!-- 右侧竖栏常驻：以前写在 Home.vue 里，只有「我的文件」有，
+         切到别的页右边就空了。挂在外壳上，五页共用同一份实例，
+         展开/收起状态也不会因为切页被重置。
+         搜索依赖页面内容，所以只往上抛事件，由当前页决定怎么处理。 -->
+    <SideRail @search="$emit('rail-search', $event)" />
   </div>
 </template>
 
@@ -81,6 +87,7 @@
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { api, getToken } from '../api.js'
+import SideRail from './SideRail.vue'
 
 const props = defineProps({
   /// 当前高亮项；不传则从当前路由推导（推荐，避免父页面与地址栏不一致）
