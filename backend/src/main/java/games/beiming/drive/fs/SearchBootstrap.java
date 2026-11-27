@@ -36,14 +36,7 @@ public class SearchBootstrap {
                 // 库里应该有、索引里应该有的全部节点（回收站不算）
                 List<FileService.Node> live = jdbc.query(
                         "select * from drv_node where status <> 'TRASHED' and parent_id is not null",
-                        (rs, i) -> new FileService.Node(
-                                rs.getLong("id"), rs.getLong("owner_id"),
-                                (Long) rs.getObject("parent_id"),
-                                rs.getString("name"), rs.getString("path"), rs.getString("kind"),
-                                rs.getLong("size"), rs.getString("mime"), rs.getString("sha256"),
-                                rs.getString("status"),
-                                rs.getTimestamp("created_at").toInstant(),
-                                rs.getTimestamp("updated_at").toInstant()));
+                        FileService.MAPPER);
 
                 int before = index.docCount();
                 if (before == live.size()) {

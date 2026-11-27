@@ -20,13 +20,19 @@ import java.util.Map;
 public class FileController {
 
     private final FileService files;
+    private final FsPurgeService purge;
     private final BlobStore blobs;
     private final CurrentUser currentUser;
+    private final int trashRetentionDays;
 
-    public FileController(FileService files, BlobStore blobs, CurrentUser currentUser) {
+    public FileController(FileService files, FsPurgeService purge, BlobStore blobs,
+                          CurrentUser currentUser,
+                          @org.springframework.beans.factory.annotation.Value("${drive.trash.retention-days:30}") int trashRetentionDays) {
         this.files = files;
+        this.purge = purge;
         this.blobs = blobs;
         this.currentUser = currentUser;
+        this.trashRetentionDays = trashRetentionDays;
     }
 
     public record MkdirReq(Long parentId, @NotBlank @Size(max = 255) String name) {
@@ -135,15 +141,25 @@ public class FileController {
     }
 
     @PostMapping("/{id}/restore")
-    public ApiResponse<Void> restore(@PathVariable long id) {
-        files.restore(currentUser.require().userId(), id);
-        return ApiResponse.ok(null);
+    public ApiResponse<FileService.Node> restore(@PathVariable long id) {
+        return ApiResponse.ok(files.restore(currentUser.require().userId(), id));
     }
 
     @DeleteMapping("/{id}/purge")
-    public ApiResponse<Void> purge(@PathVariable long id) {
-        files.purge(currentUser.require().userId(), id);
-        return ApiResponse.ok(null);
+    public ApiResponse<FsPurgeService.Result> purge(@PathVariable long id) {
+        return ApiResponse.ok(purge.purgeOne(currentUser.require().userId(), id));
+    }
+
+    /** 清空整个回收站。和单条 purge 走同一套编排，只是把顶层条目全取出来。 */
+    @DeleteMapping("/trash")
+    public ApiResponse<FsPurgeService.Result> emptyTrash() {
+        return ApiResponse.ok(purge.purgeAllTrashed(currentUser.require().userId()));
+    }
+
+    /** 回收站概况（顶层条目数 + 真实占用的字节 + 保留天数）。 */
+    @GetMapping("/trash/summary")
+    public ApiResponse<FileService.TrashSummary> trashSummary() {
+        return ApiResponse.ok(files.trashSummary(currentUser.require().userId(), trashRetentionDays));
     }
 
     @GetMapping("/trash")

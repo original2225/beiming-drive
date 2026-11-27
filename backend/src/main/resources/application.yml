@@ -29,6 +29,15 @@ drive:
     dist: ${DRIVE_WEB_DIST:/app/web}
   storage:
     root: ${DRIVE_STORAGE_ROOT:/data/blobs}
+    # 孤儿 blob 清扫的冷静期：刚写进磁盘、节点还没入库的文件正在这个窗口里，
+    # 不能当成孤儿删掉。上传大文件 + 网络慢的时候这个窗口要够长。
+    gc-grace-minutes: ${DRIVE_GC_GRACE_MINUTES:30}
+  trash:
+    # 回收站保留天数，到期由 TrashCleanupJob 自动彻底删除并释放磁盘
+    retention-days: ${DRIVE_TRASH_RETENTION_DAYS:30}
+    # 每天凌晨 3 点跑。改这个要确认容器时区是 Asia/Shanghai（Dockerfile 里已设 TZ）
+    cron: ${DRIVE_TRASH_CRON:0 0 3 * * *}
+    enabled: ${DRIVE_TRASH_ENABLED:true}
   auth:
     # 不提供默认值：没设 DRIVE_JWT_SECRET 就启动失败，避免拿公开的示例密钥上线
     jwt-secret: ${DRIVE_JWT_SECRET}

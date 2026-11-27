@@ -58,21 +58,26 @@ public class FileService {
 
     public record Node(long id, long ownerId, Long parentId, String name, String path,
                        String kind, long size, String mime, String sha256,
-                       String status, Instant createdAt, Instant updatedAt) {
+                       String status, Instant createdAt, Instant updatedAt, Instant trashedAt,
+                       String originalPath) {
 
         public boolean isDir() {
             return "dir".equals(kind);
         }
     }
 
-    private static final RowMapper<Node> MAPPER = (rs, i) -> new Node(
+    /** 行映射。公开给 SearchBootstrap 复用 —— 节点字段加一个，两处手写构造就得改两处，
+     *  漏一处就是编译错。共用一份映射，加字段只改这一个地方。 */
+    public static final RowMapper<Node> MAPPER = (rs, i) -> new Node(
             rs.getLong("id"), rs.getLong("owner_id"),
             (Long) rs.getObject("parent_id"),
             rs.getString("name"), rs.getString("path"), rs.getString("kind"),
             rs.getLong("size"), rs.getString("mime"), rs.getString("sha256"),
             rs.getString("status"),
             rs.getTimestamp("created_at").toInstant(),
-            rs.getTimestamp("updated_at").toInstant());
+            rs.getTimestamp("updated_at").toInstant(),
+            rs.getTimestamp("trashed_at") == null ? null : rs.getTimestamp("trashed_at").toInstant(),
+            rs.getString("original_path"));
 
     private static String join(String parentPath, String name) {
         if ("/".equals(parentPath)) return "/" + name;
@@ -150,13 +155,45 @@ public class FileService {
         return out;
     }
 
+    /**
+     * 找一个没被占用的路径。
+     *
+     * <p>现在唯一的使用场景是**恢复**：文件在回收站里待着的时候，用户可能又在原位置
+     * 建了个同名条目。恢复时不能撞 {@code uq_drv_node_path}，也不该把那新条目删掉，
+     * 所以给回来的那个换个名字（`报告 (1).docx`），和文件管理器的行为一致。
+     *
+     * <p>新建/改名/移动**不需要**调用它 —— 回收站里的条目现在住在
+     * {@code /.trash/<id>} 独立命名空间（见 {@link #trash}），不会再占着可见路径。
+     *
+     * @param excludeId 要把自己排除在「占用」之外时传自己的 id；新建传 null
+     */
+    private String freePath(long ownerId, Node parent, String name, Long excludeId) {
+        String candidate = name;
+        int seq = 1;
+        while (true) {
+            String path = join(parent.path(), candidate);
+            Integer dup = jdbc.queryForObject(
+                    "select count(*) from drv_node where owner_id=? and path=? and (?::bigint is null or id<>?)",
+                    Integer.class, ownerId, path, excludeId, excludeId);
+            if (dup == null || dup == 0) return path;
+            int dot = name.lastIndexOf('.');
+            // 带扩展名时把序号插在扩展名前面（报告 (1).pdf 而不是 报告.pdf (1)）
+            if (dot > 0 && !name.endsWith(".")) {
+                candidate = name.substring(0, dot) + " (" + seq++ + ")" + name.substring(dot);
+            } else {
+                candidate = name + " (" + seq++ + ")";
+            }
+            if (seq > 999) throw new DriveException(ErrorCode.CONFLICT, "同名条目太多了");
+        }
+    }
+
     @Transactional
     public Node mkdir(long ownerId, Long parentId, String name) {
         Node parent = parentId == null ? rootOf(ownerId) : byId(ownerId, parentId);
         if (!parent.isDir()) throw new DriveException(ErrorCode.BAD_REQUEST, "父节点不是目录");
         String path = join(parent.path(), name);
         Integer dup = jdbc.queryForObject(
-                "select count(*) from drv_node where owner_id=? and path=? and status<>'TRASHED'",
+                "select count(*) from drv_node where owner_id=? and path=?",
                 Integer.class, ownerId, path);
         if (dup != null && dup > 0) throw new DriveException(ErrorCode.CONFLICT);
 
@@ -176,12 +213,13 @@ public class FileService {
         return created;
     }
 
-    /** 建文件条目（内容已落到 blob 之后调用）。同名已存在则覆盖内容。 */
+    /** 建文件条目（内容已落到 blob 之后调用）。同名可见文件则覆盖内容。 */
     @Transactional
     public Node putFile(long ownerId, Long parentId, String name, String mime,
                         String sha256, long size) {
         Node parent = parentId == null ? rootOf(ownerId) : byId(ownerId, parentId);
         if (!parent.isDir()) throw new DriveException(ErrorCode.BAD_REQUEST, "父节点不是目录");
+
         String path = join(parent.path(), name);
 
         List<Node> existing = jdbc.query(
@@ -233,21 +271,57 @@ public class FileService {
                 delta, ownerId);
     }
 
-    /** 移入回收站（目录级联）。 */
+    /**
+     * 移入回收站（目录级联）。
+     *
+     * <p>关键在于**搬家**：把 path 从 `/<原名>` 改成 `/.trash/<id>`，
+     * 子树跟着换成 `/.trash/<id>/…`。
+     *
+     * <p>为什么要搬：{@code uq_drv_node_path} 不区分 status，回收站里的条目
+     * 如果还占着 `/<原名>`，用户删掉再上传一个同名文件就会撞唯一约束 —— 500。
+     * （这个 bug 是本次实测发现的）。给新建让路、自动加序号只会把内部约束
+     * 漏成「报告 (1).docx」这种莫名的名字。搬进独立命名空间，两边就再也不打架。
+     *
+     * <p>原路径记进 {@code original_path}，恢复时照着搬回去。
+     */
     @Transactional
     public void trash(long ownerId, long id) {
         Node n = byId(ownerId, id);
         if (n.parentId() == null) throw new DriveException(ErrorCode.BAD_REQUEST, "不能删除根目录");
-        jdbc.update("update drv_node set status='TRASHED', trashed_at=now() " +
-                "where owner_id=? and (id=? or path like ?)", ownerId, id, n.path() + "/%");
-        adjustQuota(ownerId, -(subtreeBytes(ownerId, id)));
+
+        String trashPath = trashRootOf(id);
+        // 配额必须**搬之前**算：subtreeBytes 按 path 前缀统计，一搬就找不到了
+        long bytes = subtreeBytes(ownerId, id);
+
+        // 先子树后自己，理由同 rename：避免前缀互相覆盖
+        List<Node> sub = jdbc.query(
+                "select * from drv_node where owner_id=? and path like ? order by length(path) desc",
+                MAPPER, ownerId, n.path() + "/%");
+        // 子树必须跟着标 TRASHED —— 只搬 path 不搬 status 的话，
+        // 里面的文件还留着 READY，既是「在回收站里」又是「活文件」，两边都算不清。
+        List<Object[]> batch = new ArrayList<>();
+        for (Node d : sub) {
+            batch.add(new Object[]{
+                    d.status().equals("TRASHED")
+                            ? d.path()
+                            : trashPath + d.path().substring(n.path().length()),
+                    d.path(),   // 子树节点也要记住自己的原路径
+                    d.id()});
+        }
+        jdbc.batchUpdate("update drv_node set path=?, original_path=coalesce(original_path, ?), "
+                + "status='TRASHED', trashed_at=now() where id=?", batch);
+        jdbc.update("update drv_node set status='TRASHED', trashed_at=now(), path=?, "
+                + "original_path=coalesce(original_path, ?) where id=?", trashPath, n.path(), id);
+
+        adjustQuota(ownerId, -bytes);
         // 回收站里的不进索引，整棵子树都摘掉
         indexRemove(id);
-        for (Node d : jdbc.query(
-                "select * from drv_node where owner_id=? and path like ?",
-                MAPPER, ownerId, n.path() + "/%")) {
-            indexRemove(d.id());
-        }
+        for (Node d : sub) indexRemove(d.id());
+    }
+
+    /** 回收站里的位置：`/.trash/<id>`。用 id 而不是原名，同名条目互不干扰。 */
+    private static String trashRootOf(long id) {
+        return "/.trash/" + id;
     }
 
     private long subtreeBytes(long ownerId, long id) {
@@ -258,24 +332,109 @@ public class FileService {
         return v == null ? 0L : v;
     }
 
+    /**
+     * 从回收站恢复。
+     *
+     * <p>{@code (owner_id, path)} 是全局唯一约束，所以恢复时如果原位置已经被
+     * 同名的东西占了（删掉之后又重新建了一个），直接 update 会撞唯一键、抛 500。
+     * 这里改成自动换个名字恢复：优先叫「原名 (恢复)」，还占着就加序号。
+     * 用户点「恢复」是想把东西拿回来，不是想看一个数据库约束报错。
+     */
     @Transactional
-    public void restore(long ownerId, long id) {
+    public Node restore(long ownerId, long id) {
         Node n = byId(ownerId, id);
-        jdbc.update("update drv_node set status='READY', trashed_at=null " +
-                "where owner_id=? and (id=? or path like ?)", ownerId, id, n.path() + "/%");
+        if (!"TRASHED".equals(n.status())) {
+            throw new DriveException(ErrorCode.STATE_CONFLICT, "这一项不在回收站里");
+        }
+
+        // 只允许恢复**顶层**条目。回收站界面也只列顶层，所以这不会挡住正常操作；
+        // 而单独恢复一个子条目会让它的父目录留在 /.trash 里，状态就说不清了。
+        Integer parentTrashed = jdbc.queryForObject(
+                "select count(*) from drv_node p join drv_node c on c.parent_id=p.id "
+                        + "where c.id=? and p.status='TRASHED'",
+                Integer.class, id);
+        if (parentTrashed != null && parentTrashed > 0) {
+            throw new DriveException(ErrorCode.STATE_CONFLICT, "请恢复它所在的那个文件夹");
+        }
+
+        // 照着 original_path 搬回可见空间。子树的原路径是它自己的 original_path，
+        // 不需要按前缀推算 —— trash() 时逐个记下来了，这样父目录中途被改名也不会错位。
+        List<Node> subtree = jdbc.query(
+                "select * from drv_node where owner_id=? and (id=? or path like ?) "
+                        + "order by length(path) desc",
+                MAPPER, ownerId, id, n.path() + "/%");
+
+        // 原位置可能已经被新的同名条目占了（删了之后又建了一个）—— 这时根节点换个名字，
+        // 子树按「根节点的新名字」重新拼。只有这一层需要避让，用户看得懂。
+        String targetPath = originalPathOf(subtree, id, n);
+        String targetName = targetPath.substring(targetPath.lastIndexOf('/') + 1);
+        Integer taken = jdbc.queryForObject(
+                "select count(*) from drv_node where owner_id=? and path=? and id<>?",
+                Integer.class, ownerId, targetPath, id);
+        if (taken != null && taken > 0) {
+            Node parent = byId(ownerId, n.parentId());
+            String free = freePath(ownerId, parent, targetName, id);
+            targetPath = free;
+            targetName = free.substring(free.lastIndexOf('/') + 1);
+        }
+
+        // 逐条搬回去：用各自的 original_path 拼新路径（根节点用 targetPath 的名字）
+        List<Object[]> moves = new ArrayList<>();
+        for (Node d : subtree) {
+            String dest;
+            if (d.id() == id) {
+                dest = targetPath;
+            } else {
+                String own = d.originalPath();
+                if (own == null) continue;              // 理论上不该有，跳过别乱改
+                dest = targetPath + own.substring(originalPathOf(subtree, id, n).length());
+            }
+            moves.add(new Object[]{dest, d.id()});
+        }
+        jdbc.batchUpdate("update drv_node set path=? where id=?", moves);
+        // name 必须跟着 path 一起改：只改 path 的话，列表里还显示旧名字，
+        // 「撞名.txt」的用户点重命名会看到「撞名 (1).txt」，自己都懵。
+        jdbc.update("update drv_node set name=?, status='READY', trashed_at=null, "
+                + "original_path=null where id=?", targetName, id);
+        jdbc.update("update drv_node set status='READY', trashed_at=null, original_path=null "
+                + "where owner_id=? and path like ? and id<>?", ownerId, targetPath + "/%", id);
+
         adjustQuota(ownerId, subtreeBytes(ownerId, id));
         // 恢复后重新进索引
         for (Node d : jdbc.query(
                 "select * from drv_node where owner_id=? and (id=? or path like ?)",
-                MAPPER, ownerId, id, n.path() + "/%")) {
+                MAPPER, ownerId, id, targetPath + "/%")) {
             indexPut(d);
         }
+        return byId(ownerId, id);
     }
 
-    /** 彻底删除（含 blob 引用计数不管，交给后续 GC 任务）。 */
+    /** 取节点自己的原路径；历史数据可能没记（迁移前就进了回收站），退回当前路径。 */
+    private static String originalPathOf(List<Node> subtree, long id, Node self) {
+        for (Node d : subtree) {
+            if (d.id() == id && d.originalPath() != null) return d.originalPath();
+        }
+        return self.originalPath() != null ? self.originalPath() : self.path();
+    }
+
+    /**
+     * 彻底删除一条。
+     *
+     * <p>{@code purge} 不管调用者是用户手点还是定时任务，都走同一个入口 ——
+     * 两条路径要是各写一份删除 SQL，早晚会有一边漏掉索引或者漏掉 blob。
+     *
+     * <p>返回被删掉的 sha256 列表，调用方拿去 {@link games.beiming.drive.storage.BlobGcService#releaseIfOrphan}
+     * 释放磁盘。物理删除放在事务外做（见 FsPurgeService），所以这里只负责「记录没了」。
+     */
     @Transactional
-    public void purge(long ownerId, long id) {
+    public List<String> purge(long ownerId, long id) {
         Node n = byId(ownerId, id);
+        // 先把要被删的文件 sha 收齐（含子树），删完就查不到了
+        List<String> shas = jdbc.queryForList(
+                "select sha256 from drv_node where owner_id=? and kind='file' and sha256 is not null " +
+                        "and (id=? or path like ?)",
+                String.class, ownerId, id, n.path() + "/%");
+
         // 先摘索引再删数据：索引里留着已不存在的条目，搜到了点进去会 404
         indexRemove(id);
         for (Node d : jdbc.query(
@@ -285,11 +444,41 @@ public class FileService {
         }
         jdbc.update("delete from drv_node where owner_id=? and (id=? or path like ?)",
                 ownerId, id, n.path() + "/%");
+        return shas;
     }
 
+    /**
+     * 回收站里「真正是顶层条目」的那些。
+     *
+     * <p>为什么不能直接把 status='TRASHED' 全列出来：删一个非空文件夹时，
+     * {@link #trash} 按 path 前缀把整棵子树一起标成 TRASHED（这是对的，
+     * 恢复时才能整棵回来）。但回收站界面要是把它们全列出来，
+     * 用户看到的是一堆「文件夹 + 它里面每个文件」的重复条目，
+     * 删了文件夹还会看到里面的文件单独躺在回收站里。
+     *
+     * <p>顶层判定：父节点不是 TRASHED（父节点为 null 的是根，根不会进回收站）。
+     * 用 NOT EXISTS 而不是查出来在 Java 里过滤，是因为这条件本来就能由索引承担。
+     */
     public List<Node> trashList(long ownerId) {
-        return jdbc.query("select * from drv_node where owner_id=? and status='TRASHED' " +
-                "and parent_id is not null order by trashed_at desc", MAPPER, ownerId);
+        return jdbc.query(
+                "select n.* from drv_node n where n.owner_id=? and n.status='TRASHED' " +
+                        "and n.parent_id is not null " +
+                        "and not exists (select 1 from drv_node p " +
+                        "                where p.id=n.parent_id and p.status='TRASHED') " +
+                        "order by n.trashed_at desc",
+                MAPPER, ownerId);
+    }
+
+    /** 回收站里「顶层条目」的个数与字节，给存储页和清理接口用。口径同 {@link #trashList}。
+     *  retentionDays 一起带出来，前端展示「保留 N 天」不用自己写死一个数。 */
+    public record TrashSummary(int entries, long bytes, int retentionDays) {
+    }
+
+    public TrashSummary trashSummary(long ownerId, int retentionDays) {
+        List<Node> tops = trashList(ownerId);
+        long bytes = 0;
+        for (Node n : tops) bytes += subtreeBytes(ownerId, n.id());
+        return new TrashSummary(tops.size(), bytes, retentionDays);
     }
 
     /** 改名或移动：级联更新子树 path。 */

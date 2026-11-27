@@ -41,6 +41,11 @@ public class BlobStore {
         log.info("blob store root = {}", root);
     }
 
+    /** 存储根目录。给孤儿 blob 清扫（{@link BlobGcService}）遍历用。 */
+    public Path root() {
+        return root;
+    }
+
     public Path pathOf(String sha256) {
         if (sha256 == null || sha256.length() != 64) {
             throw new DriveException(ErrorCode.STORAGE_ERROR, "非法 blob key");
