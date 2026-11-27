@@ -9,9 +9,16 @@
 
       <!-- 上传按钮：只有「我的文件」能用（要落在当前目录下）。
            其他页面不显示，避免点了不知道传到哪里去。 -->
-      <button v-if="curShowUpload" class="btn btn-primary new-btn" @click="$emit('upload')">
-        <span class="plus">+</span> 上传文件
-      </button>
+      <!-- 上传按钮：只在「我的文件」出现。
+           用 transition 而不是裸 v-if —— 裸 v-if 会让它在切页瞬间消失，
+           下面的导航猛地往上跳一下，观感很硬。
+           这里收掉时同时缩高度+淡出，让导航平滑顶上（高度/外边距都要动，
+           只淡不缩的话位置还是会瞬间跳）。 -->
+      <transition name="upload-slot">
+        <button v-if="curShowUpload" class="btn btn-primary new-btn" @click="$emit('upload')">
+          <span class="plus">+</span> 上传文件
+        </button>
+      </transition>
 
       <nav class="side-nav">
         <div v-for="it in navs" :key="it.key"
@@ -225,5 +232,48 @@ const pct = computed(() => {
 @media (prefers-reduced-motion: reduce) {
   .content-swap-leave-active, .content-swap-enter-active { transition-duration: .01ms !important; }
   .content-swap-enter-from { opacity: 1; transform: none; filter: none; }
+}
+
+/* ---- 上传按钮的出入场 ----
+ * 关键：高度和 margin 必须一起动。只做 opacity 的话，
+ * 元素虽然看不见了，位置却还在（或者反过来瞬间塌掉），导航照样会跳。
+ * 用 max-height 而不是 height：元素高度由 padding 撑，写死 height 会裁字。
+ * 节奏：离场 .24s、入场 .26s，和内容区过渡（.16/.26）大致同步。 */
+/* 离场：透明度**延迟**到最后才降。
+ * 如果和高度一起线性收，文字会在还占着位置时就先褪光 ——
+ * 实测 100ms 那帧只剩一条淡色残影，看着像没渲染完。
+ * 现在前半段文字清楚、被 overflow 自然裁掉，最后再淡出收尾。 */
+.upload-slot-leave-active {
+  transition: max-height .24s cubic-bezier(.4,0,.2,1),
+              opacity .10s ease .14s,
+              margin-bottom .24s cubic-bezier(.4,0,.2,1),
+              padding-top .24s cubic-bezier(.4,0,.2,1),
+              padding-bottom .24s cubic-bezier(.4,0,.2,1),
+              transform .24s cubic-bezier(.4,0,.2,1);
+  overflow: hidden;
+  /* 这个值要贴着按钮的**真实高度**（实测 36px）。
+     写成 60px 会有一段"空转"：max-height 从 60 收到 36 期间，
+     实际高度一直被内容撑着不变，实测前 92ms 高度纹丝不动、只有透明度在变，
+     看着就是"先淡一下，然后突然塌"。40px 只留 4px 余量，几乎全程都在缩。 */
+  max-height: 40px;
+}
+/* 入场反过来：先从高度 0 长出来，字晚一点显 */
+.upload-slot-enter-active {
+  transition: max-height .26s cubic-bezier(.34,.8,.35,1),
+              opacity .12s ease .08s,
+              margin-bottom .26s cubic-bezier(.34,.8,.35,1),
+              padding-top .26s cubic-bezier(.34,.8,.35,1),
+              padding-bottom .26s cubic-bezier(.34,.8,.35,1),
+              transform .26s cubic-bezier(.34,.8,.35,1);
+}
+
+.upload-slot-enter-from,
+.upload-slot-leave-to {
+  max-height: 0;
+  opacity: 0;
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  transform: translateY(-4px);
 }
 </style>
