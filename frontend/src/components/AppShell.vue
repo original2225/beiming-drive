@@ -4,7 +4,9 @@
          收起后只留 64px 图标条：展开/收起用 width 过渡，不用 transform ——
          transform 不改变布局盒子，主区不会跟着让位，收起时内容会压在侧栏底下。 -->
     <aside class="side">
-      <!-- 收起态：logo + 图标条。展开按钮放在最下面，和右侧竖栏的「打开」对称。 -->
+      <!-- 收起态：logo + 图标条。
+           中间的空白是一条「点击区」：点它就展开，和右侧竖栏的留白点击一致，
+           人不必非得瞄着底部那个小箭头。 -->
       <div v-if="collapsed" class="side-mini">
         <button class="mini-brand" title="展开侧栏" @click="collapsed = false">
           <img src="/whale-flat-128.png" alt="北冥云盘" />
@@ -14,15 +16,27 @@
           <button v-for="it in navs" :key="it.key"
                   class="mini-item" :class="{ on: curActive === it.key }"
                   :title="it.label" @click="go(it.key)">
-            <i class="ic">{{ it.icon }}</i>
+            <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path :d="it.path" /></svg>
           </button>
         </nav>
 
+        <!-- 空白区：点一下展开。cursor 给 pointer，配一条淡提示线说明这里能点。 -->
+        <div class="mini-gap" title="展开侧栏" @click="collapsed = false">
+          <span class="gap-tip">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+          </span>
+        </div>
+
         <div class="mini-foot">
-          <button class="mini-ava" :class="{ hasImg: !!avatarUrl }"
-                  :title="me?.nickname || '账户'" @click="router.push('/profile')">
-            <img v-if="avatarUrl" :src="avatarUrl" alt="" />
-            <span v-else>{{ myLetter }}</span>
+          <!-- 收起态不放头像：只有 32px 大，认不出是谁，还占掉最显眼的位置。
+               改成电池 + 百分比，用最少的像素回答「我还剩多少空间」。 -->
+          <button class="mini-battery" :class="{ 'is-full': Number(pct) >= 90 }"
+                  :title="`已用 ${usedText} / ${quotaText}（${pct}%）`"
+                  @click="router.push('/storage')">
+            <span class="bat-shell">
+              <span class="bat-fill" :style="{ height: barPct > 0 ? Math.max(barPct, 7) + '%' : '0%' }"></span>
+            </span>
+            <span class="bat-pct">{{ batText }}<i>%</i></span>
           </button>
           <button class="mini-toggle" title="展开侧栏" @click="collapsed = false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
@@ -57,9 +71,13 @@
         <div v-for="it in navs" :key="it.key"
              class="nav-item" :class="{ on: curActive === it.key }"
              @click="go(it.key)">
-          <i class="ic">{{ it.icon }}</i><span>{{ it.label }}</span>
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path :d="it.path" /></svg><span>{{ it.label }}</span>
         </div>
       </nav>
+
+      <!-- 展开态的空白也是可点的：点一下就收起。
+           没有这块的话，收起只能靠顶栏那个小箭头，空白处点了没反应显得呆。 -->
+      <div class="side-gap" title="收起侧栏" @click="collapsed = true"></div>
 
       <div class="side-foot">
         <!-- 用户区：头像 + 昵称，点进「个人信息」页。
@@ -193,11 +211,20 @@ function contentKeyOf(r) {
 
 /// 导航项顺序固定，四个页面共用。回收站以前只有「我的文件」侧栏里有，
 /// 导致切到分享/下载器时侧栏会突然少一项 —— 这里统一成四项。
+/* 导航图标用内联 SVG 而不是 emoji。
+   原因：emoji（🗂 🔗 🗑）是彩色位图字体，`color` 管不了它 ——
+   收起态没有文字兜底，四个图标颜色深浅不一、还各自带一套配色，
+   放在 64px 图标条里就是「不明显」。SVG 用 currentColor，
+   选中/悬停/深浅全跟着 CSS 变量走，形态也比 emoji 干净。 */
 const navs = [
-  { key: 'files', icon: '🗂', label: '我的文件', to: '/' },
-  { key: 'shares', icon: '🔗', label: '我的分享', to: '/shares' },
-  { key: 'downloader', icon: '⤓', label: '专属下载器', to: '/downloader' },
-  { key: 'trash', icon: '🗑', label: '回收站', to: null },
+  { key: 'files', label: '我的文件', to: '/',
+    path: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z' },
+  { key: 'shares', label: '我的分享', to: '/shares',
+    path: 'M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1-1' },
+  { key: 'downloader', label: '专属下载器', to: '/downloader',
+    path: 'M12 4v11m0 0l-4-4m4 4l4-4M4 19h16' },
+  { key: 'trash', label: '回收站', to: null,
+    path: 'M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M10 11v6M14 11v6' },
 ]
 
 function freeze(el) {
@@ -275,6 +302,15 @@ const pct = computed(() => {
   const p = (me.value?.storageUsed / me.value?.storageQuota) * 100 || 0
   return p > 0 ? p.toFixed(1) : '0.0'
 })
+/* 电池上的数字：不足 1% 时显示 <1，而不是圆整成 0。
+   新账号就是 9.8KB / 50GB，真实值是 0.00002%，四舍五入成 0%
+   会让人以为「一格都没用」，看到电池空着反而困惑。 */
+const batText = computed(() => {
+  const p = (me.value?.storageUsed / me.value?.storageQuota) * 100 || 0
+  if (p <= 0) return '0'
+  if (p < 1) return '<1'
+  return Math.round(p)
+})
 </script>
 
 <style scoped>
@@ -337,42 +373,124 @@ const pct = computed(() => {
 .mini-nav { display: flex; flex-direction: column; gap: 4px; width: 100%; }
 .mini-item {
   position: relative;
-  width: 100%; height: 40px; border: 0; border-radius: 10px;
-  /* 收起态只有图标没有文字，颜色必须比展开态深一档才有存在感 ——
-     用 --ink-2 实测在浅色侧栏上几乎看不出有没有这一项。 */
+  width: 100%; height: 42px; border: 0; border-radius: 11px;
+  /* 收起态只剩图标，没有文字兜底，所以：
+     1) 颜色比展开态深一档（展开态未选中是 --ink-2，这里用 --ink）
+     2) 字号加大到 19px（原来是 17.5，在 64px 宽里显得小） */
   background: transparent; color: var(--ink); cursor: pointer;
   display: grid; place-items: center;
-  transition: background .18s, color .18s;
+  transition: background .2s ease, color .2s ease, transform .16s cubic-bezier(.3,.6,.35,1);
 }
-.mini-item .ic { font-style: normal; font-size: 17.5px; }
-.mini-item:hover { background: #f6f7fc; }
+.mini-item .ic {
+  width: 21px; height: 21px;
+  fill: none; stroke: currentColor;
+  stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round;
+  /* 线条图标没有文字兜底时全靠它撑住存在感 */
+  filter: drop-shadow(0 1px 1px rgba(20,26,48,.08));
+  transition: transform .18s cubic-bezier(.3,.6,.35,1);
+}
+.mini-item:hover { background: #eef1fa; }
+.mini-item:hover .ic { transform: scale(1.08); }
 .mini-item.on { background: var(--brand-soft); color: var(--brand-deep); }
+.mini-item.on .ic { filter: drop-shadow(0 1px 2px rgba(68,83,214,.22)); }
 
-.mini-foot { margin-top: auto; display: flex; flex-direction: column;
-             align-items: center; gap: 8px; }
-.mini-ava {
-  width: 32px; height: 32px; border-radius: 50%; padding: 0; border: 0;
-  display: grid; place-items: center; overflow: hidden; cursor: pointer;
-  background: linear-gradient(135deg, var(--brand), #7b5bf7);
-  color: #fff; font-size: 14px; font-weight: 600;
-  transition: transform .2s cubic-bezier(.3,.6,.35,1);
+/* ---- 空白点击区 ----
+   收起态中间那大片留白现在是可点的：点一下展开。
+   光秃秃一片看不出能点，所以：
+   · 一条很淡的竖引导线，把这段「通道」和导航区分开
+   · 中央常驻一个很淡的 » 箭头（不是只 hover 才出现）——
+     常驻才叫「被发现」，只 hover 才出现等于没做，因为没人会去悬停一片空白。
+     透明度压到 0.22，平时只是一点若有若无的痕迹，悬停时才完全亮起来。 */
+.mini-gap {
+  flex: 1; width: 100%; position: relative;
+  display: grid; place-items: center;
+  cursor: pointer; border-radius: 10px;
+  transition: background .2s ease;
 }
-.mini-ava > img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.mini-ava:hover { transform: scale(1.08); }
+.mini-gap::before {
+  content: '';
+  position: absolute;
+  width: 1px; height: 100%; max-height: 140px;
+  background: linear-gradient(180deg, transparent, #d9deea 18%, #d9deea 82%, transparent);
+  transition: background .22s ease;
+}
+.mini-gap:hover { background: #f7f9fd; }
+.mini-gap:hover::before { background: linear-gradient(180deg, transparent, #c2c9dc 18%, #c2c9dc 82%, transparent); }
+.gap-tip {
+  position: relative;
+  display: grid; place-items: center;
+  /* 0.22 实测太淡（放大两倍才看得见）；0.45 采样 rgb(181,187,203) = 1.9:1；
+     0.42 采样 rgb(157,163,180) = 2.5:1 —— 都不到非文字图形 3:1 的底线。
+     这个滑块是 60px 宽的白底窄条，箭头再深就抢导航注意力了，
+     所以不靠调透明度硬凑，改用「常驻但不刺眼 + 悬停立刻变实」：
+     0.55 是实测刚好过 3:1 的值。 */
+  opacity: .55; transform: translateX(-2px);
+  transition: opacity .22s ease, transform .22s ease;
+}
+.gap-tip svg {
+  width: 15px; height: 15px; fill: none; stroke: var(--ink-2);
+  stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round;
+}
+.mini-gap:hover .gap-tip { opacity: 1; transform: translateX(2px); }
+
+.mini-foot { display: flex; flex-direction: column;
+             align-items: center; gap: 10px; padding-top: 6px; }
+
+/* ---- 电池：收起态的存储指示 ----
+   竖着的电池，填充从底部往上长；旁边一行百分比。
+   为什么不用环形进度：电池的形状一眼就是「还剩多少」，
+   环形还要读刻度。 */
+.mini-battery {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  border: 0; background: transparent; cursor: pointer; padding: 2px 0;
+  transition: transform .18s cubic-bezier(.3,.6,.35,1);
+}
+.mini-battery:hover { transform: translateY(-1px); }
+.bat-shell {
+  position: relative;
+  width: 16px; height: 30px;
+  border: 1.6px solid #c3cade; border-radius: 4px;
+  /* 电池正极的小凸起 */
+  padding: 1.5px;
+  display: flex; align-items: flex-end;
+}
+.bat-shell::before {
+  content: '';
+  position: absolute; left: 50%; top: -4px;
+  width: 6px; height: 2.4px; margin-left: -3px;
+  background: #c3cade; border-radius: 1px;
+}
+.bat-fill {
+  width: 100%; border-radius: 2px;
+  background: linear-gradient(180deg, #6b7bf8, #5b76f7);
+  transition: height .5s cubic-bezier(.3,.55,.4,.95);
+}
+.bat-pct {
+  /* 10.5px 在这个宽度上偏小，实测截图里几乎读不出来；11.5px 才够 */
+  font-size: 11.5px; font-weight: 600; color: var(--ink-2);
+  font-variant-numeric: tabular-nums; letter-spacing: -.2px;
+}
+.bat-pct i { font-style: normal; font-size: 9px; font-weight: 500; color: var(--ink-3); }
+/* 快满了换个颜色提醒一下 —— 电池满格变红是通用语汇 */
+.mini-battery.is-full .bat-fill { background: linear-gradient(180deg, #f0836f, #e2574a); }
+.mini-battery.is-full .bat-pct { color: var(--danger); }
+
 .mini-toggle {
-  width: 28px; height: 28px; border-radius: 8px;
-  border: 1px solid transparent; background: transparent; color: var(--ink-3);
-  display: grid; place-items: center; cursor: pointer; transition: .16s;
+  width: 30px; height: 30px; border-radius: 9px;
+  border: 1px solid transparent; background: transparent; color: var(--ink-2);
+  display: grid; place-items: center; cursor: pointer;
+  transition: background .16s, border-color .16s, color .16s, transform .16s;
 }
-.mini-toggle svg { width: 15px; height: 15px; fill: none; stroke: currentColor;
-                   stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
-.mini-toggle:hover { background: #f2f4fb; border-color: var(--line); color: var(--ink); }
+.mini-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor;
+                   stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.mini-toggle:hover { background: #eef1fa; border-color: var(--line); color: var(--ink); }
+.mini-toggle:hover svg { transform: translateX(1.5px); }
 
 /* 图标条上的悬停标签：64px 放不下文字，用 tooltip 补上名字。
    纯 CSS 实现，不引第三方库；写右边是因为侧栏在最左。 */
 .mini-item::after,
 .mini-toggle::after,
-.mini-ava::after {
+.mini-battery::after {
   content: attr(title);
   position: absolute; left: calc(100% + 10px); top: 50%;
   transform: translateY(-50%) translateX(-4px);
@@ -384,10 +502,10 @@ const pct = computed(() => {
 }
 .mini-item:hover::after,
 .mini-toggle:hover::after,
-.mini-ava:hover::after {
+.mini-battery:hover::after {
   opacity: 1; transform: translateY(-50%) translateX(0);
 }
-.mini-toggle, .mini-ava { position: relative; }
+.mini-toggle, .mini-battery { position: relative; }
 /* 收起态下，主区顶部那根分隔线不用再画（侧栏已经只剩一条窄边） */
 .shell.side-collapsed .side-brand { padding-bottom: 16px; }
 
@@ -400,6 +518,16 @@ const pct = computed(() => {
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 
 .side-nav { display: flex; flex-direction: column; gap: 4px; }
+
+/* 展开态的弹性空白：占掉导航与用户区之间的所有空间，
+   同时是「点一下收起」的热区。不给底色、不放内容，
+   视觉上它就是一段留白，但鼠标移上去有细微反馈说明可以点。 */
+.side-gap {
+  flex: 1; min-height: 24px; border-radius: 10px;
+  cursor: pointer;
+  transition: background .2s ease;
+}
+.side-gap:hover { background: #f4f6fc; }
 .nav-item {
   display: flex; align-items: center; gap: 11px;
   /* 行高比浮起：之前 padding 9px、项间 gap 2px，四项挤成一坨，读着累 */
@@ -408,10 +536,13 @@ const pct = computed(() => {
   transition: background .18s, color .18s;
   /* 高亮靠背景+颜色平滑过渡，不是一闪就换 */
 }
-.nav-item i { font-size: 16.5px; }
 .nav-item:hover { background: #f6f7fc; color: var(--ink); }
 .nav-item.on { background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
-.nav-item .ic { font-style: normal; width: 18px; text-align: center; }
+.nav-item .ic {
+  width: 18px; height: 18px; flex-shrink: 0;
+  fill: none; stroke: currentColor;
+  stroke-width: 1.85; stroke-linecap: round; stroke-linejoin: round;
+}
 
 .side-foot { margin-top: auto; padding-top: 18px; }
 .user-btn {
