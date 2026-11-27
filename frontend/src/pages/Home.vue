@@ -1421,7 +1421,7 @@ onUnmounted(() => {
 
 .topbar {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  padding: 13px 24px; background: #fff; border-bottom: 1px solid var(--line);
+  padding: 15px 34px; background: #fff; border-bottom: 1px solid var(--line);
 }
 .crumbs { display: flex; align-items: center; gap: 7px; font-size: 14.5px;
           min-width: 0; overflow: hidden; }
@@ -1448,7 +1448,7 @@ onUnmounted(() => {
 
 .bar-info {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 11px 24px 8px; font-size: 14px; gap: 12px; flex-shrink: 0;
+  padding: 11px 34px 8px; font-size: 14px; gap: 12px; flex-shrink: 0;
 }
 .right-side { display: flex; align-items: center; gap: 10px; }
 .sort-group { display: flex; align-items: center; gap: 4px; }
@@ -1460,7 +1460,7 @@ onUnmounted(() => {
 .sort-btn.on { background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
 .sort-btn i { font-style: normal; margin-left: 3px; font-size: 11.5px; }
 
-.list { flex: 1; overflow-y: auto; padding: 0 24px 24px; }
+.list { flex: 1; overflow-y: auto; padding: 0 34px 30px; }
 
 /* 表头：列宽必须与 .row 完全一致，否则文字会跟数据错位 */
 .thead {

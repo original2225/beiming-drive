@@ -154,6 +154,19 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 
 <style scoped>
 
+/* 之前这一页压根没给 .page 定内边距和宽度上限，
+   于是标题、输入框、任务卡片全都顶着窗口边缘，横向拉满 ——
+   和「我的文件 / 存储空间」那几页明显不是一套。
+   这里补齐，并限宽：一行文字超过 760px 就要来回扫，读着累。 */
+.page {
+  flex: 1; display: flex; flex-direction: column;
+  overflow-y: auto; padding: 30px 34px 48px; min-height: 0;
+}
+.page > * { max-width: 760px; width: 100%; }
+
+/* 不做宽屏居中：后台界面左对齐才是惯例，且其余四页都是左对齐限宽，
+   只有这一页居中会和它们对不上。右侧留白是限宽的自然结果，不是缺陷。 */
+
 .head h2 { margin: 0; font-size: 21px; }
 .head p { margin: 7px 0 26px; font-size: 14px; }
 
@@ -165,11 +178,17 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 .err { background: #fff5f4; color: var(--danger); border: 1px solid #ffd5d2;
        padding: 9px 12px; border-radius: 9px; font-size: 13.5px; margin-top: 12px; }
 
-.list-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; margin-top: 4px; }
+.list-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 16px; margin-top: 4px;
+  /* 和卡片内部同一条右边线：「刷新」原本顶在 760px 边界上，
+     而卡片里的按钮有 24px 内边距，右边会错开一截。 */
+  padding: 0 24px;
+}
 .list-head h3 { margin: 0; font-size: 16.5px; }
 
 .jobs { display: flex; flex-direction: column; gap: 10px; }
-.job { display: flex; align-items: center; gap: 16px; padding: 17px 20px; }
+.job { display: flex; align-items: center; gap: 16px; padding: 18px 24px; }
 .job-main { flex: 1; min-width: 0; }
 .job-name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .job-meta { display: flex; align-items: center; gap: 9px; font-size: 12.5px; margin-top: 6px; flex-wrap: wrap; }

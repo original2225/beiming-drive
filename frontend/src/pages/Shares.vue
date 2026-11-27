@@ -81,6 +81,8 @@ onMounted(() => {
 /* 布局骨架（.shell/.side/.main）已经搬到 AppShell 里，
    这里只留「内容区」自己的样式，避免三份重复定义互相打架。 */
 .page { padding: 30px 34px 46px; }
+/* 与存储页/个人页同宽上限，避免超宽屏下一行拉太长 */
+.page > * { max-width: 760px; width: 100%; }
 .page h2 { margin: 0 0 6px; font-size: 21px; }
 .sub { margin: 5px 0 22px; font-size: 13.5px; }
 
