@@ -219,9 +219,9 @@ onMounted(async () => {
 <style scoped>
 .page {
   flex: 1; display: flex; flex-direction: column;
-  overflow-y: auto; padding: 30px 34px 46px; min-height: 0;
+  overflow-y: auto; padding: 30px var(--page-pad) 46px; min-height: 0;
 }
-.page > * { max-width: 760px; width: 100%; }
+/* 内容宽度上限由全局 styles/page-layout.css 统一给（随侧栏收放自适应） */
 h2 { margin: 0 0 6px; font-size: 21px; font-weight: 600; color: var(--ink); }
 .sub { margin: 0 0 18px; font-size: 13.5px; }
 .muted { color: var(--ink-3); }

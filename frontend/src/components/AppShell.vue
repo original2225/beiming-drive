@@ -1,10 +1,43 @@
 <template>
-  <div class="shell">
-    <!-- ===== 侧栏：唯一一份，路由切换时不重建 ===== -->
+  <div class="shell" :class="{ 'side-collapsed': collapsed }">
+    <!-- ===== 侧栏：唯一一份，路由切换时不重建 =====
+         收起后只留 64px 图标条：展开/收起用 width 过渡，不用 transform ——
+         transform 不改变布局盒子，主区不会跟着让位，收起时内容会压在侧栏底下。 -->
     <aside class="side">
+      <!-- 收起态：logo + 图标条。展开按钮放在最下面，和右侧竖栏的「打开」对称。 -->
+      <div v-if="collapsed" class="side-mini">
+        <button class="mini-brand" title="展开侧栏" @click="collapsed = false">
+          <img src="/whale-flat-128.png" alt="北冥云盘" />
+        </button>
+
+        <nav class="mini-nav">
+          <button v-for="it in navs" :key="it.key"
+                  class="mini-item" :class="{ on: curActive === it.key }"
+                  :title="it.label" @click="go(it.key)">
+            <i class="ic">{{ it.icon }}</i>
+          </button>
+        </nav>
+
+        <div class="mini-foot">
+          <button class="mini-ava" :class="{ hasImg: !!avatarUrl }"
+                  :title="me?.nickname || '账户'" @click="router.push('/profile')">
+            <img v-if="avatarUrl" :src="avatarUrl" alt="" />
+            <span v-else>{{ myLetter }}</span>
+          </button>
+          <button class="mini-toggle" title="展开侧栏" @click="collapsed = false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- 展开态 -->
+      <div v-else class="side-full">
       <div class="side-brand">
         <img src="/whale-flat-128.png" alt="logo" />
         <span>北冥云盘</span>
+        <button class="side-toggle" title="收起侧栏" @click="collapsed = true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
+        </button>
       </div>
 
       <!-- 上传按钮：只有「我的文件」能用（要落在当前目录下）。
@@ -60,6 +93,7 @@
           </div>
         </button>
       </div>
+      </div><!-- /side-full -->
     </aside>
 
     <!-- ===== 主区 =====
@@ -108,6 +142,17 @@ defineEmits(['upload'])
 
 const router = useRouter()
 const route = useRoute()
+
+/// 左侧栏是否收起。
+/// 存进 localStorage：这是「我这台机器习惯怎么用」的偏好，刷新一次就变回去会很烦。
+/// 读的时候兜住 localStorage 不可用的情况（隐私模式会抛异常）。
+const SIDE_KEY = 'drive_side_collapsed'
+const collapsed = ref((() => {
+  try { return localStorage.getItem(SIDE_KEY) === '1' } catch (e) { return false }
+})())
+watch(collapsed, v => {
+  try { localStorage.setItem(SIDE_KEY, v ? '1' : '0') } catch (e) { /* 存不了就算了 */ }
+})
 
 /// 外壳自己拉一次用户信息：配额、头像都在这里用，
 /// 不依赖各页面是否记得传（之前就是漏传导致配额条一直是空的）
@@ -237,17 +282,114 @@ const pct = computed(() => {
 .shell { display: flex; height: 100vh; overflow: hidden; background: var(--bg); }
 
 .side {
+  /* 收起 64px、展开 232px。用 width 过渡而不是 transform：
+     transform 不改变布局盒子，主区不会跟着让位，收起后内容会压在图标条底下。 */
   width: 232px; flex-shrink: 0;
   background: #fff; border-right: 1px solid var(--line);
   padding: 18px 14px 16px;
   display: flex; flex-direction: column;
+  overflow: hidden;
+  transition: width .28s cubic-bezier(.3, .6, .35, 1),
+              padding .28s cubic-bezier(.3, .6, .35, 1);
 }
+/* 注意选择器的特异性：展开态是 `.side`（一个类），收起态是 `.shell.side-collapsed .side`
+   （两个类），本该赢。但 Vue 的 scoped 会给两边都补 `[data-v-xxx]`，
+   变成 `[0,2,0]` 对 `[0,3,0]` —— 还是收起态赢。
+   实测却输了，说明两条规则的**书写顺序**在编译后反了：
+   稳妥做法是再叠一层，把收起态抬到明显更高的权重，别赌顺序。 */
+.shell.side-collapsed .side,
+.side.side-collapsed {
+  /* 64px 而不是 56：图标 18px + 左右各 8px 内边距 + 描边，
+     再窄下去悬停的圆角块会贴着边框，看着很挤。 */
+  width: 64px; padding: 18px 8px 16px;
+}
+.side-full { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .side-brand {
   display: flex; align-items: center; gap: 10px;
   padding: 0 6px 20px; font-weight: 700; font-size: 17.5px;
   letter-spacing: -.1px;
 }
-.side-brand img { width: 30px; height: 30px; border-radius: 50%; }
+.side-brand img { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; }
+.side-brand > span { flex: 1; min-width: 0; }
+/* 收起按钮：贴着品牌行右端，平时很淡，hover 才显形 —— 常驻会一直和 logo 抢视线 */
+.side-toggle {
+  width: 26px; height: 26px; border-radius: 7px; flex-shrink: 0;
+  border: 1px solid transparent; background: transparent; color: var(--ink-3);
+  display: grid; place-items: center; cursor: pointer; transition: .16s;
+}
+.side-toggle svg { width: 15px; height: 15px; fill: none; stroke: currentColor;
+                   stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
+.side-toggle:hover { background: #f2f4fb; border-color: var(--line); color: var(--ink); }
+
+/* ---------- 收起态 ---------- */
+.side-mini {
+  height: 100%; display: flex; flex-direction: column; align-items: center;
+  gap: 14px;
+}
+.mini-brand {
+  width: 34px; height: 34px; border-radius: 50%; padding: 0; border: 0;
+  background: transparent; cursor: pointer; flex-shrink: 0;
+  transition: transform .2s cubic-bezier(.3,.6,.35,1);
+}
+.mini-brand img { width: 100%; height: 100%; border-radius: 50%; display: block; }
+.mini-brand:hover { transform: scale(1.08); }
+
+.mini-nav { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.mini-item {
+  position: relative;
+  width: 100%; height: 40px; border: 0; border-radius: 10px;
+  /* 收起态只有图标没有文字，颜色必须比展开态深一档才有存在感 ——
+     用 --ink-2 实测在浅色侧栏上几乎看不出有没有这一项。 */
+  background: transparent; color: var(--ink); cursor: pointer;
+  display: grid; place-items: center;
+  transition: background .18s, color .18s;
+}
+.mini-item .ic { font-style: normal; font-size: 17.5px; }
+.mini-item:hover { background: #f6f7fc; }
+.mini-item.on { background: var(--brand-soft); color: var(--brand-deep); }
+
+.mini-foot { margin-top: auto; display: flex; flex-direction: column;
+             align-items: center; gap: 8px; }
+.mini-ava {
+  width: 32px; height: 32px; border-radius: 50%; padding: 0; border: 0;
+  display: grid; place-items: center; overflow: hidden; cursor: pointer;
+  background: linear-gradient(135deg, var(--brand), #7b5bf7);
+  color: #fff; font-size: 14px; font-weight: 600;
+  transition: transform .2s cubic-bezier(.3,.6,.35,1);
+}
+.mini-ava > img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mini-ava:hover { transform: scale(1.08); }
+.mini-toggle {
+  width: 28px; height: 28px; border-radius: 8px;
+  border: 1px solid transparent; background: transparent; color: var(--ink-3);
+  display: grid; place-items: center; cursor: pointer; transition: .16s;
+}
+.mini-toggle svg { width: 15px; height: 15px; fill: none; stroke: currentColor;
+                   stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
+.mini-toggle:hover { background: #f2f4fb; border-color: var(--line); color: var(--ink); }
+
+/* 图标条上的悬停标签：64px 放不下文字，用 tooltip 补上名字。
+   纯 CSS 实现，不引第三方库；写右边是因为侧栏在最左。 */
+.mini-item::after,
+.mini-toggle::after,
+.mini-ava::after {
+  content: attr(title);
+  position: absolute; left: calc(100% + 10px); top: 50%;
+  transform: translateY(-50%) translateX(-4px);
+  background: rgba(22,25,42,.92); color: #fff;
+  font-size: 12.5px; font-weight: 400;
+  padding: 5px 10px; border-radius: 7px; white-space: nowrap;
+  opacity: 0; pointer-events: none; z-index: 30;
+  transition: opacity .16s ease, transform .16s ease;
+}
+.mini-item:hover::after,
+.mini-toggle:hover::after,
+.mini-ava:hover::after {
+  opacity: 1; transform: translateY(-50%) translateX(0);
+}
+.mini-toggle, .mini-ava { position: relative; }
+/* 收起态下，主区顶部那根分隔线不用再画（侧栏已经只剩一条窄边） */
+.shell.side-collapsed .side-brand { padding-bottom: 16px; }
 
 .new-btn { margin-top: 2px;
   width: 100%; margin-bottom: 16px;

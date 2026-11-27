@@ -167,12 +167,9 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
    这里补齐，并限宽：一行文字超过 760px 就要来回扫，读着累。 */
 .page {
   flex: 1; display: flex; flex-direction: column;
-  overflow-y: auto; padding: 30px 34px 48px; min-height: 0;
+  overflow-y: auto; padding: 30px var(--page-pad) 48px; min-height: 0;
 }
-.page > * { max-width: 760px; width: 100%; }
-
-/* 不做宽屏居中：后台界面左对齐才是惯例，且其余四页都是左对齐限宽，
-   只有这一页居中会和它们对不上。右侧留白是限宽的自然结果，不是缺陷。 */
+/* 内容宽度上限由全局 styles/page-layout.css 统一给（随侧栏收放自适应） */
 
 .head h2 { margin: 0; font-size: 21px; }
 .head p { margin: 7px 0 26px; font-size: 14px; }

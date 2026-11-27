@@ -1,5 +1,5 @@
 <template>
-  <div class="page">
+  <div class="page form-page">
     <h2>个人信息</h2>
     <p class="muted sub">账号、头像和安全设置</p>
 
@@ -341,10 +341,10 @@ onMounted(async () => {
 <style scoped>
 .page {
   flex: 1; display: flex; flex-direction: column;
-  overflow-y: auto; padding: 30px 34px 48px; min-height: 0;
+  overflow-y: auto; padding: 30px var(--page-pad) 48px; min-height: 0;
 }
-/* 宽屏下不让卡片拉得太宽：表单一行超过 700px 读起来要来回扫 */
-.page > * { max-width: 720px; width: 100%; }
+/* 宽屏下不让卡片拉得太宽：表单一行超过 700px 读起来要来回扫。
+   具体数值由全局 styles/page-layout.css 的 .form-page 给。 */
 h2 { margin: 0 0 6px; font-size: 21px; font-weight: 600; color: var(--ink); }
 .sub { margin: 0 0 18px; font-size: 13.5px; }
 .muted { color: var(--ink-3); }
