@@ -1,42 +1,9 @@
 <template>
-  <div class="shell" :class="{ entering }">
-    <!-- ===== 侧栏 ===== -->
-    <aside class="side" :class="{ 'intro-side': entering }">
-      <div class="side-brand">
-        <img src="/whale-flat-128.png" alt="logo" />
-        <span>北冥云盘</span>
-      </div>
+  <div class="page home-page">
 
-      <button class="btn btn-primary new-btn" @click="pickUpload">
-        <span class="plus">+</span> 上传文件
-      </button>
-
-      <nav class="side-nav">
-        <div class="nav-item" :class="{ on: view === 'files' }" @click="goHome">
-          <i class="ic">🗂</i><span>我的文件</span>
-        </div>
-        <div class="nav-item" @click="$router.push('/shares')">
-          <i class="ic">🔗</i><span>我的分享</span>
-        </div>
-        <div class="nav-item" @click="$router.push('/downloader')">
-          <i class="ic">⤓</i><span>专属下载器</span>
-        </div>
-        <div class="nav-item" :class="{ on: view === 'trash' }" @click="openTrash">
-          <i class="ic">🗑</i><span>回收站</span>
-        </div>
-      </nav>
-
-      <div class="side-foot">
-        <div class="quota">
-          <div class="quota-top"><span class="muted">存储空间</span></div>
-          <div class="bar"><div class="bar-in" :style="{ width: barPct + '%' }"></div></div>
-          <div class="quota-num">{{ usedText }} / {{ quotaText }} · {{ pct }}%</div>
-        </div>
-      </div>
-    </aside>
-
-    <!-- ===== 主区 ===== -->
-    <main class="main" :class="{ 'intro-main': entering }">
+    <!-- 主区内容。外层的 shell/side/main 由 AppShell 提供，
+         这里不要再套 <main>，否则会出现两层 main、padding 叠一次。 -->
+    <div class="content" :class="{ 'intro-main': entering }">
       <header class="topbar">
         <div class="crumbs">
           <template v-if="view === 'files'">
@@ -165,7 +132,7 @@
           <div class="up-pct">{{ u.pct < 0 ? '失败' : u.pct + '%' }}</div>
         </div>
       </div>
-    </main>
+    </div>
 
     <!-- ===== 右侧竖栏 =====
          折叠：顶部头像、底部放大镜，中间空白区提示「可以向左打开」
@@ -175,7 +142,8 @@
       <transition name="rail-fade">
         <div v-if="!railOpen" class="rail-mini">
           <button class="mini-avatar" :title="me?.nickname || '账户'" @click="railOpen = true">
-            <span>{{ (me?.nickname || 'U').slice(0, 1) }}</span>
+            <img v-if="avatarUrl" :src="avatarUrl" :alt="me?.nickname || '头像'" />
+            <span v-else>{{ (me?.nickname || 'U').slice(0, 1) }}</span>
           </button>
 
           <!-- 中间空白：悬停提示可以向左打开 -->
@@ -201,7 +169,22 @@
       <transition name="rail-slide">
         <div v-if="railOpen" class="rail-full">
           <div class="rail-head">
-            <div class="rail-avatar">{{ (me?.nickname || 'U').slice(0, 1) }}</div>
+            <!-- 点头像 → 出现相机遮罩；点遮罩打开文件选择 -->
+            <button class="rail-avatar" :class="{ hasImg: !!avatarUrl }" title="更换头像"
+                    @click="pickAvatar" @contextmenu.prevent="askRemoveAvatar">
+              <img v-if="avatarUrl" :src="avatarUrl" :alt="me?.nickname || '头像'" />
+              <span v-else>{{ (me?.nickname || 'U').slice(0, 1) }}</span>
+              <span class="avatar-cam" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.6l1-1.6h4.8L14.9 6h1.6A2.5 2.5 0 0 1 19 8.5v8A2.5 2.5 0 0 1 16.5 19h-10A2.5 2.5 0 0 1 4 16.5v-8Z" />
+                  <circle cx="11.5" cy="12.5" r="3.1" />
+                </svg>
+              </span>
+              <span v-if="avatarBusy" class="avatar-spin" aria-hidden="true"></span>
+            </button>
+            <!-- 隐藏的文件选择器：点头像触发，选完立刻上传 -->
+            <input ref="avatarInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif"
+                   class="avatar-input" @change="onAvatarPicked" />
             <div class="rail-who">
               <div class="rail-name">{{ me?.nickname || '未登录' }}</div>
               <div class="rail-mail" :title="me?.email">{{ me?.email }}</div>
@@ -409,7 +392,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, setToken, downloadUrl, previewUrl } from '../api.js'
+import { api, setToken, getToken, downloadUrl, previewUrl } from '../api.js'
 
 const router = useRouter()
 const CHUNK = 8 * 1024 * 1024
@@ -423,6 +406,91 @@ const trail = ref([])
 const uploads = ref([])
 // 右侧竖栏是否展开（默认收起：顶部头像、底部放大镜）
 const railOpen = ref(false)
+
+/// 内容层的身份标识：变了才播过渡。
+/// 「我的文件」内部切目录也算一次内容变化（列表整块换掉），
+/// 所以把 currentId 拼进来；回收站单独一个 key。
+const contentKey = computed(() => {
+  if (view.value === 'trash') return 'trash'
+  return 'files:' + (currentId.value ?? 'root')
+})
+
+
+// ===== 头像 =====
+/// 头像地址带版本参数，换完立刻能看到新图（浏览器不会用旧缓存）
+const avatarUrl = ref(null)
+const avatarBusy = ref(false)
+const avatarInput = ref(null)
+
+function syncAvatarFromMe() {
+  const key = me.value?.avatarKey
+  if (!key) { avatarUrl.value = null; return }
+  // 两个要点：
+  //  1) v= 用 key（带时间戳），换图后 URL 变 → 浏览器不会拿旧缓存
+  //  2) 必须带 access_token：<img src> 发不出 Authorization 头，
+  //     不带 token 这个请求会被拦截器判 401，图直接裂。拦截器本来就认
+  //     access_token 查询参数（文件预览/下载都靠它），这里沿用它。
+  const t = encodeURIComponent(getToken())
+  avatarUrl.value = `/api/v1/auth/avatar?v=${encodeURIComponent(key)}&access_token=${t}`
+}
+
+function pickAvatar() {
+  if (avatarBusy.value) return
+  avatarInput.value && avatarInput.value.click()
+}
+
+async function onAvatarPicked(e) {
+  const file = e.target.files && e.target.files[0]
+  // 选完立刻清空，否则同一个文件第二次选不会触发 change
+  e.target.value = ''
+  if (!file) return
+
+  if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
+    showToast('只支持 PNG / JPEG / WebP / GIF 图片', 'err')
+    return
+  }
+  if (file.size > 1024 * 1024) {
+    showToast('头像不能超过 1 MB', 'err')
+    return
+  }
+
+  const fd = new FormData()
+  fd.append('file', file)
+  avatarBusy.value = true
+  try {
+    const r = await api.uploadAvatar(fd)
+    if (me.value) me.value.avatarKey = r.avatarKey
+    // 走统一函数拼 URL，避免这里忘了带 access_token
+    syncAvatarFromMe()
+    showToast('头像已更新')
+  } catch (err) {
+    showToast(err.message || '头像上传失败', 'err')
+  } finally {
+    avatarBusy.value = false
+  }
+}
+
+function askRemoveAvatar() {
+  if (!avatarUrl.value || avatarBusy.value) return
+  // askConfirm 是回调式：把动作塞进 run，确认后才执行
+  askConfirm({
+    title: '删除头像',
+    text: '删除当前头像？删除后显示姓名首字。',
+    okText: '删除头像',
+    danger: true,
+    run: async () => {
+      avatarBusy.value = true
+      try {
+        await api.deleteAvatar()
+        avatarUrl.value = null
+        if (me.value) me.value.avatarKey = null
+        showToast('头像已删除')
+      } finally {
+        avatarBusy.value = false
+      }
+    }
+  })
+}
 // 新建菜单是否打开
 const newMenu = ref(false)
 const folderInput = ref(null)
@@ -514,7 +582,10 @@ function fmtDate(iso) {
 }
 
 async function loadMe() {
-  try { me.value = await api.me() } catch (e) { /* 401 交给路由守卫 */ }
+  try {
+    me.value = await api.me()
+    syncAvatarFromMe()
+  } catch (e) { /* 401 交给路由守卫 */ }
 }
 
 async function refresh() {
@@ -534,6 +605,11 @@ async function refresh() {
 
 async function openTrash() {
   view.value = 'trash'
+  // 同步到地址栏：从别的页面点「回收站」是 router.push('/?view=trash')，
+  // 反过来在这里也补上 query，两者保持一致，刷新后仍停在回收站。
+  if (router.currentRoute.value.query.view !== 'trash') {
+    router.replace({ path: '/', query: { view: 'trash' } })
+  }
   searching.value = false
   menuFor.value = null
   loading.value = true
@@ -549,6 +625,10 @@ async function openTrash() {
 
 function goHome() {
   view.value = 'files'
+  // 从回收站回文件列表时把 query 去掉，否则刷新会又跳回回收站
+  if (router.currentRoute.value.query.view) {
+    router.replace({ path: '/', query: {} })
+  }
   currentId.value = null
   trail.value = []
   keyword.value = ''
@@ -1002,7 +1082,14 @@ function onKey(e) {
 }
 
 onMounted(() => {
-  refresh()
+  // 带 ?view=trash 进来（比如在「我的分享」页点了回收站）就直接进回收站。
+  // 注意要用 openTrash 而不是 refresh，两者取的数据源不同。
+  const wantTrash = router.currentRoute.value.query.view === 'trash'
+  if (wantTrash) {
+    openTrash()
+  } else {
+    refresh()
+  }
 
   // 入场：整页从薄雾里显形，侧栏与主区分层错开
   if (!SKIP_INTRO) {
@@ -1031,7 +1118,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.shell { display: flex; height: 100vh; overflow: hidden; background: var(--bg); }
 
 /* ================= 右侧竖栏 =================
    收起时只占 62px：顶一个头像、底一个放大镜，中间是留白。
@@ -1071,7 +1157,9 @@ onUnmounted(() => {
 .mini-avatar {
   background: linear-gradient(135deg, #5b76f7, #7b5bf7);
   border-color: transparent;
+  overflow: hidden;
 }
+.mini-avatar > img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: inherit; }
 .mini-avatar:hover {
   transform: scale(1.12);
   box-shadow: 0 6px 18px rgba(91, 118, 247, .38);
@@ -1124,11 +1212,51 @@ onUnmounted(() => {
 }
 .rail-head { display: flex; align-items: center; gap: 10px; padding: 2px 2px 12px; }
 .rail-avatar {
+  position: relative; overflow: hidden;
   width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0;
   display: grid; place-items: center; color: #fff; font-size: 16px; font-weight: 600;
   background: linear-gradient(135deg, #5b76f7, #7b5bf7);
   box-shadow: 0 3px 12px rgba(91, 118, 247, .3);
+  border: 0; padding: 0; cursor: pointer;
+  transition: box-shadow .2s, transform .2s;
 }
+.rail-avatar > img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.rail-avatar:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(91, 118, 247, .4); }
+
+/* 相机遮罩：平时透明，悬停或聚焦时浮出，让「能改」这件事看得见 */
+.avatar-cam {
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  background: rgba(20, 24, 40, .52);
+  opacity: 0; transition: opacity .18s;
+  pointer-events: none;
+}
+.avatar-cam svg {
+  width: 19px; height: 19px; fill: none;
+  stroke: #fff; stroke-width: 1.7; stroke-linejoin: round;
+}
+.rail-avatar:hover .avatar-cam,
+.rail-avatar:focus-visible .avatar-cam { opacity: 1; }
+/* 有图片时遮罩稍微淡一点，别盖住整张脸 */
+.rail-avatar.hasImg:hover .avatar-cam { opacity: .85; }
+
+/* 上传中：头像压暗 + 转圈 */
+.avatar-spin {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: rgba(255, 255, 255, .55);
+}
+.avatar-spin::after {
+  content: ''; position: absolute; inset: 50% auto auto 50%;
+  width: 16px; height: 16px; margin: -8px 0 0 -8px;
+  border: 2px solid rgba(91, 118, 247, .28);
+  border-top-color: #5b76f7; border-radius: 50%;
+  animation: avatar-spin .7s linear infinite;
+}
+@keyframes avatar-spin { to { transform: rotate(360deg); } }
+
+.avatar-input { display: none; }
 .rail-who { min-width: 0; flex: 1; }
 .rail-name { font-size: 13.5px; font-weight: 600; overflow: hidden;
              text-overflow: ellipsis; white-space: nowrap; }
@@ -1233,7 +1361,6 @@ onUnmounted(() => {
    曲线教训：cubic-bezier(.16,.72,...) 这类「前段极快」的曲线，会让进度在
    中段就冲到顶然后停住 —— 实测 opacity 卡在 0.46 不动了 260ms，看着像卡顿。
    改成分段均匀的关键帧 + 温和曲线，全程都在变化。 */
-.shell.entering { animation: shell-rise 1.2s cubic-bezier(.3, .55, .4, .95) both; }
 @keyframes shell-rise {
   0%   { opacity: .15; filter: blur(14px)  saturate(.75); transform: scale(1.022); }
   20%  { opacity: .34; filter: blur(10.5px) saturate(.82); transform: scale(1.017); }
@@ -1243,52 +1370,27 @@ onUnmounted(() => {
   100% { opacity: 1;   filter: blur(0)     saturate(1);    transform: scale(1); }
 }
 /* 侧栏与主区各自错开一点，让显形有「层层展开」的层次，不是一块雾整体散开 */
-.side.intro-side { animation: side-rise .85s cubic-bezier(.3, .55, .4, .95) .05s both; }
 @keyframes side-rise {
   0%   { opacity: 0;    transform: translateX(-16px); }
   100% { opacity: 1;    transform: none; }
 }
-.main.intro-main { animation: main-rise .92s cubic-bezier(.3, .55, .4, .95) .16s both; }
+.content.intro-main { animation: main-rise .92s cubic-bezier(.3, .55, .4, .95) .16s both; }
 @keyframes main-rise {
   0%   { opacity: 0;   transform: translateY(14px); }
   100% { opacity: 1;   transform: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .shell.entering, .side.intro-side, .main.intro-main { animation: none; }
 }
 
-.side {
-  width: 236px; flex-shrink: 0; background: #fff; border-right: 1px solid var(--line);
-  display: flex; flex-direction: column; padding: 18px 14px 14px;
-}
-.side-brand { display: flex; align-items: center; gap: 9px; padding: 0 6px 16px;
-              font-weight: 700; font-size: 15.5px; letter-spacing: .3px; }
-.side-brand img { width: 30px; height: 30px; border-radius: 50%; }
 
-.new-btn { width: 100%; justify-content: center; height: 38px; margin-bottom: 18px; }
 .plus { font-size: 17px; line-height: 1; margin-top: -1px; }
 
-.side-nav { display: flex; flex-direction: column; gap: 2px; }
-.nav-item {
-  display: flex; align-items: center; gap: 10px; padding: 9px 11px;
-  border-radius: 9px; font-size: 13.5px; color: var(--ink-2);
-  cursor: pointer; transition: background .15s, color .15s;
-}
-.nav-item:hover { background: #f6f7fc; color: var(--ink); }
-.nav-item.on { background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
-.ic { font-style: normal; font-size: 15px; width: 18px; text-align: center; }
 
-.side-foot { margin-top: auto; }
-.quota { padding: 11px 12px; background: #f8f9fd; border: 1px solid #eef0f7;
-         border-radius: 10px; margin-bottom: 10px; }
-.quota-top { font-size: 11px; margin-bottom: 7px; color: var(--ink-2); }
 .bar { height: 5px; background: #e3e6f0; border-radius: 4px; overflow: hidden; }
 .bar-in { height: 100%; border-radius: 4px;
           background: linear-gradient(90deg, var(--brand), #8b9bff); transition: width .35s; }
-.quota-num { font-size: 10.5px; margin-top: 6px; color: var(--ink-2); }
 
-.side-user { display: flex; align-items: center; gap: 9px; padding: 6px 4px 2px; }
 .avatar {
   width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
   background: linear-gradient(135deg, var(--brand), #8b5cf6);
@@ -1304,7 +1406,18 @@ onUnmounted(() => {
 }
 .icon-btn:hover { border-color: #cfd4e4; color: var(--ink); background: #fafbff; }
 
-.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.home-page {
+  /* 这一层是「主区里的横向容器」：左边内容、右边竖栏。
+     AppShell 给的 .main 是纵向 flex，所以这里必须自己声明横向，
+     否则竖栏会被挤到内容下面变成左右两段。 */
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;            /* 覆盖通用 .page 的 padding */
+}
+.content { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
 
 .topbar {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;

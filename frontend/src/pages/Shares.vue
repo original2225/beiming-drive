@@ -1,25 +1,25 @@
 <template>
-  <div class="shell">
-    <aside class="side">
-      <div class="side-brand">
-        <img src="/whale-flat-128.png" alt="logo" />
-        <span>北冥云盘</span>
-      </div>
-      <nav class="side-nav">
-        <div class="nav-item" @click="$router.push('/')"><i class="ic">🗂</i><span>我的文件</span></div>
-        <div class="nav-item on"><i class="ic">🔗</i><span>我的分享</span></div>
-        <div class="nav-item" @click="$router.push('/downloader')"><i class="ic">⤓</i><span>专属下载器</span></div>
-      </nav>
-    </aside>
-
-    <main class="main">
+  <div class="page">
       <h2>我的分享</h2>
       <p class="muted sub">这里列出你创建过的所有分享链接</p>
 
-      <div v-if="loading" class="empty">加载中…</div>
+      <!-- 骨架屏：数据没回来前先给「形状」，而不是白屏或"加载中…"字样。
+           这样内容进来时是原地填满，不会出现"整块突然出现"的跳变。 -->
+      <div v-if="loading" class="rows" aria-hidden="true">
+        <div v-for="n in 3" :key="n" class="row card sk">
+          <div class="row-main">
+            <div class="sk-line w40"></div>
+            <div class="sk-line w70 thin"></div>
+          </div>
+          <div class="row-ops">
+            <div class="sk-btn"></div><div class="sk-btn"></div>
+          </div>
+        </div>
+      </div>
+
       <div v-else-if="list.length === 0" class="empty">还没有分享，去文件列表点「分享」</div>
 
-      <div v-else class="rows">
+      <div v-else class="rows fade-in">
         <div v-for="s in list" :key="s.id" class="row card">
           <div class="row-main">
             <div class="row-link">/s/{{ s.id }}</div>
@@ -37,7 +37,6 @@
           </div>
         </div>
       </div>
-    </main>
   </div>
 </template>
 
@@ -47,6 +46,7 @@ import { api } from '../api.js'
 
 const list = ref([])
 const loading = ref(false)
+const me = ref(null)
 
 function fmt(iso) {
   return new Date(iso).toLocaleString('zh-CN')
@@ -55,6 +55,10 @@ function fmt(iso) {
 async function load() {
   loading.value = true
   try { list.value = await api.myShares() } catch (e) {} finally { loading.value = false }
+}
+
+async function loadMe() {
+  try { me.value = await api.me() } catch (e) {}
 }
 
 function copyLink(s) {
@@ -66,24 +70,18 @@ async function revoke(s) {
   try { await api.revokeShare(s.id); await load() } catch (e) { alert(e.message) }
 }
 
-onMounted(load)
+onMounted(() => {
+  // 并行拉取：侧栏配额和列表互不依赖，串行会让骨架屏多停一会儿
+  load()
+  loadMe()
+})
 </script>
 
 <style scoped>
-.shell { display: flex; height: 100vh; overflow: hidden; }
-.side { width: 232px; flex-shrink: 0; background: #fff; border-right: 1px solid var(--line);
-        display: flex; flex-direction: column; padding: 18px 14px; }
-.side-brand { display: flex; align-items: center; gap: 9px; padding: 2px 6px 20px; font-weight: 700; font-size: 15.5px; }
-.side-brand img { width: 30px; height: 30px; border-radius: 50%; }
-.side-nav { display: flex; flex-direction: column; gap: 3px; }
-.nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 9px;
-            font-size: 13.5px; color: var(--ink-2); cursor: pointer; }
-.nav-item:hover { background: #f6f7fc; }
-.nav-item.on { background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
-.ic { font-style: normal; font-size: 15px; width: 18px; text-align: center; }
-
-.main { flex: 1; padding: 26px 30px; overflow-y: auto; }
-.main h2 { margin: 0; font-size: 20px; }
+/* 布局骨架（.shell/.side/.main）已经搬到 AppShell 里，
+   这里只留「内容区」自己的样式，避免三份重复定义互相打架。 */
+.page { padding: 26px 30px; }
+.page h2 { margin: 0; font-size: 20px; }
 .sub { margin: 5px 0 22px; font-size: 13px; }
 
 .rows { display: flex; flex-direction: column; gap: 10px; }
@@ -92,4 +90,36 @@ onMounted(load)
 .row-link { font-size: 13.5px; font-weight: 600; font-family: ui-monospace, monospace; }
 .row-meta { font-size: 11.5px; margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
 .row-ops { display: flex; gap: 6px; }
+
+/* ---- 骨架屏 ----
+   用和真实行完全相同的盒模型（同样的 padding / gap / 高度），
+   数据回来后是"原地填满"，不会因为尺寸变化抖一下。 */
+.sk { pointer-events: none; }
+.sk-line, .sk-btn {
+  background: linear-gradient(90deg, #eef1f7 25%, #f6f8fc 37%, #eef1f7 63%);
+  background-size: 400% 100%;
+  animation: sk-shimmer 1.4s ease-in-out infinite;
+  border-radius: 5px;
+}
+.sk-line { height: 12px; }
+.sk-line.w40 { width: 40%; }
+.sk-line.w70 { width: 70%; }
+.sk-line.thin { height: 9px; margin-top: 9px; }
+.sk-btn { width: 56px; height: 28px; border-radius: 7px; flex-shrink: 0; }
+@keyframes sk-shimmer {
+  0%   { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+/* 数据就位后整组轻轻淡入，取代"突然出现" */
+.fade-in { animation: content-in .26s cubic-bezier(.25,.55,.4,.95) both; }
+@keyframes content-in {
+  from { opacity: .55; transform: translateY(4px); }
+  to   { opacity: 1;   transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sk-line, .sk-btn { animation: none; }
+  .fade-in { animation: none; }
+}
 </style>

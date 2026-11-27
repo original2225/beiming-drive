@@ -35,7 +35,11 @@ public class AuthService {
     }
 
     public record UserView(long id, String email, String nickname, String role,
-                           long storageQuota, long storageUsed) {
+                           long storageQuota, long storageUsed, String avatarKey) {
+        /** 有头像时给前端一个可直接用的地址（带版本参数，换图即失效缓存） */
+        public String avatarUrl() {
+            return avatarKey == null ? null : "/api/v1/auth/avatar?v=" + avatarKey;
+        }
     }
 
     private static final RowMapper<UserRow> USER_MAPPER = (rs, i) -> new UserRow(
@@ -90,8 +94,7 @@ public class AuthService {
         jdbc.update("insert into drv_session(user_id, token_id, expires_at) values (?,?,?)",
                 u.id(), issued.tokenId(), java.sql.Timestamp.from(issued.expiresAt()));
 
-        return new LoginResult(issued.token(), issued.expiresAt(),
-                new UserView(u.id(), u.email(), u.nickname(), u.role(), u.quota(), u.used()));
+        return new LoginResult(issued.token(), issued.expiresAt(), viewOf(u));
     }
 
     public void logout(String tokenId) {
@@ -108,9 +111,17 @@ public class AuthService {
         return n != null && n > 0;
     }
 
+    /** 把库行转成对外视图。登录和 /me 共用，避免两处字段不一致。 */
+    private UserView viewOf(UserRow u) {
+        String avatarKey = jdbc.queryForObject(
+                "select coalesce(avatar_key,'') from drv_user where id=?", String.class, u.id());
+        return new UserView(u.id(), u.email(), u.nickname(), u.role(), u.quota(), u.used(),
+                (avatarKey == null || avatarKey.isEmpty()) ? null : avatarKey);
+    }
+
     public UserView me(long userId) {
         UserRow u = jdbc.queryForObject("select * from drv_user where id = ?", USER_MAPPER, userId);
         if (u == null) throw new DriveException(ErrorCode.UNAUTHORIZED);
-        return new UserView(u.id(), u.email(), u.nickname(), u.role(), u.quota(), u.used());
+        return viewOf(u);
     }
 }

@@ -1,27 +1,5 @@
 <template>
-  <div class="shell">
-    <aside class="side">
-      <div class="side-brand">
-        <img src="/whale-flat-128.png" alt="logo" />
-        <span>北冥云盘</span>
-      </div>
-      <nav class="side-nav">
-        <div class="nav-item" @click="$router.push('/')"><i class="ic">🗂</i><span>我的文件</span></div>
-        <div class="nav-item" @click="$router.push('/shares')"><i class="ic">🔗</i><span>我的分享</span></div>
-        <div class="nav-item on"><i class="ic">⤓</i><span>专属下载器</span></div>
-      </nav>
-      <div class="side-foot">
-        <div class="side-user">
-          <div class="avatar">{{ (me?.nickname || 'U').slice(0, 1) }}</div>
-          <div class="who">
-            <div class="name">{{ me?.nickname }}</div>
-            <div class="mail muted">{{ me?.email }}</div>
-          </div>
-        </div>
-      </div>
-    </aside>
-
-    <main class="main">
+  <div class="page">
       <div class="head">
         <div>
           <h2>专属下载器</h2>
@@ -55,9 +33,20 @@
         <button class="btn btn-sm" @click="load">刷新</button>
       </div>
 
-      <div v-if="jobs.length === 0" class="empty">还没有任务，贴个链接开始吧</div>
+      <!-- 骨架屏：首屏数据没回来前先出形状，避免"空一下 → 整块蹦出来" -->
+      <div v-if="loading && jobs.length === 0" class="jobs" aria-hidden="true">
+        <div v-for="n in 2" :key="n" class="job card sk">
+          <div class="job-main">
+            <div class="sk-line w45"></div>
+            <div class="sk-line w65 thin"></div>
+            <div class="sk-line w30 thin"></div>
+          </div>
+        </div>
+      </div>
 
-      <div v-else class="jobs">
+      <div v-else-if="jobs.length === 0" class="empty">还没有任务，贴个链接开始吧</div>
+
+      <div v-else class="jobs fade-in">
         <div v-for="j in jobs" :key="j.id" class="job card">
           <div class="job-main">
             <div class="job-name">{{ j.filename }}</div>
@@ -81,7 +70,6 @@
           </div>
         </div>
       </div>
-    </main>
   </div>
 </template>
 
@@ -97,6 +85,9 @@ const workers = ref(8)
 const busy = ref(false)
 const err = ref('')
 const jobs = ref([])
+/// 首屏是否还在取数据：只在"第一次且列表为空"时用骨架屏，
+/// 后续轮询刷新不能把已有列表打回骨架（否则每 3 秒闪一次）
+const loading = ref(true)
 let timer = null
 
 function sizeText(b) {
@@ -121,7 +112,10 @@ async function load() {
   try {
     jobs.value = await api.remoteJobs()
     me.value = await api.me()
-  } catch (e) { /* 忽略 */ }
+  } catch (e) { /* 忽略 */ } finally {
+    // 只置一次 false：后面轮询刷新不再回到骨架态
+    loading.value = false
+  }
 }
 
 async function create() {
@@ -159,26 +153,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 </script>
 
 <style scoped>
-.shell { display: flex; height: 100vh; overflow: hidden; }
-.side { width: 232px; flex-shrink: 0; background: #fff; border-right: 1px solid var(--line);
-        display: flex; flex-direction: column; padding: 18px 14px; }
-.side-brand { display: flex; align-items: center; gap: 9px; padding: 2px 6px 20px; font-weight: 700; font-size: 15.5px; }
-.side-brand img { width: 30px; height: 30px; border-radius: 50%; }
-.side-nav { display: flex; flex-direction: column; gap: 3px; }
-.nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 9px;
-            font-size: 13.5px; color: var(--ink-2); cursor: pointer; }
-.nav-item:hover { background: #f6f7fc; }
-.nav-item.on { background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
-.ic { font-style: normal; font-size: 15px; width: 18px; text-align: center; }
-.side-foot { margin-top: auto; }
-.side-user { display: flex; align-items: center; gap: 9px; padding: 8px 4px; }
-.avatar { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, var(--brand), #8b5cf6);
-          color: #fff; display: grid; place-items: center; font-weight: 600; font-size: 14px; }
-.who { flex: 1; min-width: 0; }
-.name { font-size: 13px; font-weight: 600; }
-.mail { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.main { flex: 1; padding: 26px 30px; overflow-y: auto; }
 .head h2 { margin: 0; font-size: 20px; }
 .head p { margin: 5px 0 22px; font-size: 13px; }
 
@@ -202,4 +177,34 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 .job-in { height: 100%; background: linear-gradient(90deg, var(--brand), #8b9bff); transition: .3s; }
 .job-err { font-size: 11.5px; color: var(--danger); margin-top: 7px; }
 .job-ops { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* ---- 骨架屏 ----
+   盒模型和真实任务行一致，数据回来后原地填满。 */
+.sk { pointer-events: none; }
+.sk-line {
+  height: 12px; border-radius: 5px;
+  background: linear-gradient(90deg, #eef1f7 25%, #f6f8fc 37%, #eef1f7 63%);
+  background-size: 400% 100%;
+  animation: sk-shimmer 1.4s ease-in-out infinite;
+}
+.sk-line.w45 { width: 45%; }
+.sk-line.w65 { width: 65%; }
+.sk-line.w30 { width: 30%; }
+.sk-line.thin { height: 9px; margin-top: 9px; }
+@keyframes sk-shimmer {
+  0%   { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+/* 数据就位后整组轻轻淡入 */
+.fade-in { animation: content-in .26s cubic-bezier(.25,.55,.4,.95) both; }
+@keyframes content-in {
+  from { opacity: .55; transform: translateY(4px); }
+  to   { opacity: 1;   transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sk-line { animation: none; }
+  .fade-in { animation: none; }
+}
 </style>

@@ -56,6 +56,9 @@ export const api = {
     request('/auth/register', { method: 'POST', body: { email, nickname, password } }),
   logout: () => request('/auth/logout', { method: 'POST' }),
   me: () => request('/auth/me'),
+  // 换头像：FormData 走 multipart，request 里已经识别 FormData，不要手动设 Content-Type
+  uploadAvatar: (formData) => request('/auth/avatar', { method: 'POST', body: formData }),
+  deleteAvatar: () => request('/auth/avatar', { method: 'DELETE' }),
 
   // --- files ---
   list: (parentId, orderBy, direction) => {
