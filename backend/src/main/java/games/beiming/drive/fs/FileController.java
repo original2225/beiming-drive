@@ -55,6 +55,14 @@ public class FileController {
         ));
     }
 
+    /** 存储构成：按类型统计 + 回收站占用。给「存储空间」页用。
+     *  放在 /files 下而不是 /auth，因为它依赖的是文件树，不是用户表。 */
+    @GetMapping("/storage")
+    public ApiResponse<FileService.StorageBreakdown> storage() {
+        long uid = currentUser.require().userId();
+        return ApiResponse.ok(files.storageBreakdown(uid));
+    }
+
     /** 全局搜索。返回命中条目及其所在目录路径。 */
     @GetMapping("/search")
     public ApiResponse<Map<String, Object>> search(@RequestParam String q) {

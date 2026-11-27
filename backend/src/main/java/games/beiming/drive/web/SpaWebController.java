@@ -70,7 +70,15 @@ public class SpaWebController {
         send(res, dist == null ? null : dist.resolve("assets").resolve(rel).normalize());
     }
 
-    @GetMapping({"/", "/index.html", "/login", "/shares", "/downloader", "/s/*"})
+    /** SPA 入口路由白名单。
+     *
+     *  坑（踩过两次）：新加前端页面必须在这里补一行，否则直接访问/刷新该路径
+     *  会被后端 404 —— 前端路由根本没机会接手。表现是「页面跳过去又弹回首页」，
+     *  因为 404 触发了前端 catch-all 的 redirect。
+     *
+     *  加页面时同步检查三处：main.js 的 routes、这里、以及 AppShell 的 contentKeyOf。 */
+    @GetMapping({"/", "/index.html", "/login", "/shares", "/downloader",
+            "/storage", "/profile", "/s/*"})
     public void index(HttpServletResponse res) throws IOException {
         send(res, dist == null ? null : dist.resolve("index.html"));
     }

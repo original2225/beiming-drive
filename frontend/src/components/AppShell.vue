@@ -29,12 +29,33 @@
       </nav>
 
       <div class="side-foot">
-        <!-- 存储空间：有 me 数据才显示，没数据时留空而不是显示 0 B -->
-        <div v-if="curShowQuota" class="quota">
-          <div class="quota-top"><span class="muted">存储空间</span></div>
+        <!-- 用户区：头像 + 昵称，点进「个人信息」页。
+             放这里是因为侧栏底部是人看「我是谁」的习惯位置；
+             以前这块只有一个头像占位，没有通往资料页的路。 -->
+        <button type="button" class="user-btn" :class="{ on: route.path === '/profile' }"
+                @click="router.push('/profile')">
+          <span class="user-ava" :class="{ hasImg: !!avatarUrl }">
+            <img v-if="avatarUrl" :src="avatarUrl" alt="" />
+            <span v-else>{{ myLetter }}</span>
+          </span>
+          <span class="user-info">
+            <span class="user-name">{{ me?.nickname || '未登录' }}</span>
+            <span class="user-sub">{{ me?.role === 'ADMIN' ? '管理员' : '个人用户' }}</span>
+          </span>
+          <span class="quota-go">›</span>
+        </button>
+
+        <!-- 存储空间：整块是可点的，进「存储空间」页。
+             之前只是静态展示，看着像能点却没反应。
+             hover 时整块轻微提亮 + 右侧浮出箭头，给「这里有下一页」的暗示。 -->
+        <button v-if="curShowQuota" type="button" class="quota" @click="router.push('/storage')">
+          <div class="quota-top">
+            <span class="muted">存储空间</span>
+            <span class="quota-go">›</span>
+          </div>
           <div class="bar"><div class="bar-in" :style="{ width: barPct + '%' }"></div></div>
           <div class="quota-num">{{ usedText }} / {{ quotaText }} · {{ pct }}%</div>
-        </div>
+        </button>
       </div>
     </aside>
 
@@ -54,9 +75,9 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { api } from '../api.js'
+import { api, getToken } from '../api.js'
 
 const props = defineProps({
   /// 当前高亮项；不传则从当前路由推导（推荐，避免父页面与地址栏不一致）
@@ -81,6 +102,23 @@ const route = useRoute()
 /// 外壳自己拉一次用户信息：配额、头像都在这里用，
 /// 不依赖各页面是否记得传（之前就是漏传导致配额条一直是空的）
 const meLocal = ref(null)
+
+/// 重新拉一次 me。
+/// 为什么需要：个人信息页改完昵称/头像后，侧栏是同一个组件实例（不重建），
+/// 不主动刷新的话名字还是旧的 —— 用户会以为没改成功。
+async function refreshMe() {
+  if (props.me) return          // 父层显式传了就不覆盖
+  try { meLocal.value = await api.me() } catch (e) { /* 401 交给路由守卫 */ }
+}
+
+/// 两个触发点缺一不可：
+/// - 路由变化：从别的页切回来时对齐一次（比如在别处删了头像）
+/// - profile-changed 自定义事件：改昵称/头像时路由**没变**，只有事件能通知到；
+///   早先只监听路由，实测改完昵称页内变了、侧栏还是旧名。
+watch(() => route.fullPath, refreshMe)
+onMounted(() => { window.addEventListener('drive:profile-changed', refreshMe) })
+onBeforeUnmount(() => { window.removeEventListener('drive:profile-changed', refreshMe) })
+
 onMounted(async () => {
   if (props.me) { meLocal.value = props.me; return }
   try { meLocal.value = await api.me() } catch (e) { /* 401 交给路由守卫 */ }
@@ -92,6 +130,8 @@ onMounted(async () => {
 function contentKeyOf(r) {
   if (r.path === '/shares') return 'shares'
   if (r.path === '/downloader') return 'downloader'
+  if (r.path === '/storage') return 'storage'
+  if (r.path === '/profile') return 'profile'
   if (r.query.view === 'trash') return 'trash'
   return 'files:' + (r.query.dir || 'root')
 }
@@ -147,9 +187,25 @@ const curActive = computed(() => {
   if (props.active) return props.active
   if (route.path === '/shares') return 'shares'
   if (route.path === '/downloader') return 'downloader'
+  // 个人页 / 存储页不属于左侧四项，保持全都未选中 ——
+  // 否则停在「个人信息」却高亮「我的文件」，位置反馈是错的。
+  if (route.path === '/profile' || route.path === '/storage') return ''
   if (route.query.view === 'trash') return 'trash'
   return 'files'
 })
+
+/// 侧栏头像：URL 带 avatarKey 破缓存，并附 access_token ——
+/// <img src> 发不出 Authorization 头，拦截器支持查询参数形式。
+const avatarUrl = computed(() => {
+  const key = me.value?.avatarKey
+  if (!key) return ''
+  const q = new URLSearchParams({ v: key, access_token: getToken() || '' })
+  return `/api/v1/auth/avatar?${q.toString()}`
+})
+
+/// 无头像时显示昵称首字
+const myLetter = computed(() =>
+  (me.value?.nickname || '?').trim().charAt(0).toUpperCase())
 
 /// 用户信息：父页面传了就用传的，否则用自己拉的那份
 const me = computed(() => props.me || meLocal.value)
@@ -203,7 +259,46 @@ const pct = computed(() => {
 .nav-item .ic { font-style: normal; width: 18px; text-align: center; }
 
 .side-foot { margin-top: auto; padding-top: 14px; }
-.quota { padding: 10px 4px 0; }
+.user-btn {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 7px 6px; margin-bottom: 4px;
+  border: 0; background: transparent; cursor: pointer;
+  text-align: left; font: inherit; border-radius: 9px;
+  transition: background .16s ease;
+}
+.user-btn:hover { background: #f7f8fc; }
+.user-btn.on { background: var(--brand-soft); }
+.user-btn.on .user-name { color: var(--brand-deep); }
+.user-btn:active { background: #eef0f8; }
+.user-ava {
+  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+  display: grid; place-items: center; overflow: hidden;
+  background: linear-gradient(135deg, var(--brand), #7b5bf7);
+  color: #fff; font-size: 13px; font-weight: 600;
+}
+.user-ava > img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.user-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.user-name {
+  font-size: 12.5px; color: var(--ink); font-weight: 550;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.user-sub { font-size: 10.5px; color: var(--ink-3); margin-top: 1px; }
+.user-btn:hover .quota-go { opacity: 1; transform: translateX(0); }
+
+.quota {
+  display: block; width: calc(100% + 8px); margin: 10px -4px 0;
+  padding: 8px 4px; border: 0; background: transparent; cursor: pointer;
+  text-align: left; font: inherit; border-radius: 8px;
+  transition: background .16s ease;
+}
+.quota:hover { background: #f7f8fc; }
+.quota:active { background: #eef0f8; }
+.quota-go {
+  opacity: 0; transform: translateX(-3px);
+  transition: opacity .16s ease, transform .16s ease;
+  color: var(--ink-3); font-size: 13px;
+}
+.quota:hover .quota-go { opacity: 1; transform: translateX(0); }
 .quota-top { display: flex; justify-content: space-between; font-size: 11.5px; margin-bottom: 6px; }
 .bar { height: 5px; border-radius: 3px; background: #eef0f7; overflow: hidden; }
 .bar-in { height: 100%; border-radius: 3px; background: linear-gradient(90deg, #5b76f7, #7b5bf7);

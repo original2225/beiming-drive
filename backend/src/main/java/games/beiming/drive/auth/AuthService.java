@@ -28,14 +28,15 @@ public class AuthService {
     }
 
     public record UserRow(long id, String email, String nickname, String passwordHash,
-                          String role, long quota, long used, String status) {
+                          String role, long quota, long used, String status, Instant createdAt) {
     }
 
     public record LoginResult(String token, Instant expiresAt, UserView user) {
     }
 
     public record UserView(long id, String email, String nickname, String role,
-                           long storageQuota, long storageUsed, String avatarKey) {
+                           long storageQuota, long storageUsed, String avatarKey,
+                           Instant createdAt) {
         /** 有头像时给前端一个可直接用的地址（带版本参数，换图即失效缓存） */
         public String avatarUrl() {
             return avatarKey == null ? null : "/api/v1/auth/avatar?v=" + avatarKey;
@@ -46,7 +47,8 @@ public class AuthService {
             rs.getLong("id"), rs.getString("email"), rs.getString("nickname"),
             rs.getString("password_hash"), rs.getString("role"),
             rs.getLong("storage_quota"), rs.getLong("storage_used"),
-            rs.getString("status"));
+            rs.getString("status"),
+            rs.getTimestamp("created_at").toInstant());
 
     /** 首个注册用户自动成为 ADMIN，方便本机自举。 */
     @Transactional
@@ -116,12 +118,40 @@ public class AuthService {
         String avatarKey = jdbc.queryForObject(
                 "select coalesce(avatar_key,'') from drv_user where id=?", String.class, u.id());
         return new UserView(u.id(), u.email(), u.nickname(), u.role(), u.quota(), u.used(),
-                (avatarKey == null || avatarKey.isEmpty()) ? null : avatarKey);
+                (avatarKey == null || avatarKey.isEmpty()) ? null : avatarKey, u.createdAt());
     }
 
     public UserView me(long userId) {
         UserRow u = jdbc.queryForObject("select * from drv_user where id = ?", USER_MAPPER, userId);
         if (u == null) throw new DriveException(ErrorCode.UNAUTHORIZED);
         return viewOf(u);
+    }
+
+    /** 改昵称。空串不允许 —— 侧栏、分享署名都要用到它。 */
+    @Transactional
+    public UserView updateNickname(long userId, String nickname) {
+        String name = nickname == null ? "" : nickname.trim();
+        if (name.isEmpty()) throw new DriveException(ErrorCode.BAD_REQUEST, "昵称不能为空");
+        if (name.length() > 64) throw new DriveException(ErrorCode.BAD_REQUEST, "昵称最多 64 个字");
+        jdbc.update("update drv_user set nickname=?, updated_at=now() where id=?", name, userId);
+        return me(userId);
+    }
+
+    /** 改密码。必须先验旧密码 —— 否则拿到 token 就能把号彻底占住。 */
+    @Transactional
+    public void changePassword(long userId, String oldPassword, String newPassword) {
+        if (newPassword == null || newPassword.length() < 8) {
+            throw new DriveException(ErrorCode.BAD_REQUEST, "新密码至少 8 位");
+        }
+        UserRow u = jdbc.queryForObject("select * from drv_user where id = ?", USER_MAPPER, userId);
+        if (u == null) throw new DriveException(ErrorCode.UNAUTHORIZED);
+        if (oldPassword == null || !hasher.matches(oldPassword, u.passwordHash())) {
+            throw new DriveException(ErrorCode.BAD_REQUEST, "当前密码不正确");
+        }
+        if (oldPassword.equals(newPassword)) {
+            throw new DriveException(ErrorCode.BAD_REQUEST, "新密码不能和当前密码相同");
+        }
+        jdbc.update("update drv_user set password_hash=?, updated_at=now() where id=?",
+                hasher.encode(newPassword), userId);
     }
 }

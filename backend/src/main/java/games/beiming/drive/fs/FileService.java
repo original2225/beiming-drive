@@ -15,7 +15,10 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 文件系统服务：目录树、文件条目、回收站。
@@ -370,6 +373,100 @@ public class FileService {
             indexPut(d);
         }
         return moved;
+    }
+
+    /** 存储构成：按类型分组 + 回收站占用。给「存储管理」页用。
+     *
+     *  分组口径按扩展名，不按 MIME ——
+     *  MIME 在浏览器上传时会带一堆 application/octet-stream，
+     *  扩展名反而更稳，也更好跟用户解释（「图片 3.2 GB」）。
+     *  回收站单独算：它照样占着 blob，不清掉就不算释放空间。*/
+    public record Bucket(String key, String label, int files, long bytes) {
+    }
+
+    /** 大文件条目：给「存储空间」页的「最占地方的文件」列表。
+     *  只用 name/path/size，不带 sha256 之类的内部字段。 */
+    public record BigFile(long id, String name, String path, long size, String bucket) {
+    }
+
+    public record StorageBreakdown(long total, long quota, long used, long trashBytes,
+                                   int trashFiles, List<Bucket> buckets, List<BigFile> bigFiles) {
+    }
+
+    private static final Map<String, String[]> TYPE_MAP = new LinkedHashMap<>();
+
+    static {
+        TYPE_MAP.put("image", new String[]{"图片", "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "avif", "heic"});
+        TYPE_MAP.put("video", new String[]{"视频", "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "ts", "rmvb"});
+        TYPE_MAP.put("audio", new String[]{"音频", "mp3", "flac", "wav", "aac", "ogg", "m4a", "wma", "ape"});
+        TYPE_MAP.put("doc", new String[]{"文档", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md",
+                "rtf", "csv", "odt", "ods", "odp", "epub"});
+        TYPE_MAP.put("archive", new String[]{"压缩包", "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "iso"});
+        TYPE_MAP.put("code", new String[]{"代码", "java", "js", "ts", "py", "go", "rs", "c", "cpp", "h", "cs",
+                "php", "rb", "sh", "bat", "ps1", "html", "css", "json", "xml", "yml", "yaml", "sql"});
+    }
+
+    private static String bucketOf(String name) {
+        if (name == null) return "other";
+        int dot = name.lastIndexOf('.');
+        if (dot < 0 || dot == name.length() - 1) return "other";
+        String ext = name.substring(dot + 1).toLowerCase();
+        for (Map.Entry<String, String[]> e : TYPE_MAP.entrySet()) {
+            for (int i = 1; i < e.getValue().length; i++) {
+                if (e.getValue()[i].equals(ext)) return e.getKey();
+            }
+        }
+        return "other";
+    }
+
+    public StorageBreakdown storageBreakdown(long ownerId) {
+        Long quotaObj = jdbc.queryForObject(
+                "select storage_quota from drv_user where id=?", Long.class, ownerId);
+        long quota = quotaObj == null ? 0L : quotaObj;
+        List<Node> all = jdbc.query(
+                "select * from drv_node where owner_id=? and kind='file'", MAPPER, ownerId);
+        Map<String, long[]> agg = new LinkedHashMap<>();   // key -> [files, bytes]
+        Map<String, long[]> trash = new LinkedHashMap<>();
+        for (Node n : all) {
+            String k = bucketOf(n.name());
+            boolean trashed = "TRASHED".equals(n.status());
+            Map<String, long[]> target = trashed ? trash : agg;
+            long[] a = target.computeIfAbsent(k, x -> new long[2]);
+            a[0] += 1;
+            a[1] += n.size();
+        }
+        // 所有出现的类型都要列出来（含回收站里的），否则用户看不到自己在回收站里的图片
+        LinkedHashSet<String> keys = new LinkedHashSet<>();
+        keys.addAll(agg.keySet());
+        keys.addAll(trash.keySet());
+        List<Bucket> buckets = new ArrayList<>();
+        for (String k : TYPE_MAP.keySet()) {
+            if (!keys.contains(k)) continue;
+            long[] a = agg.getOrDefault(k, new long[2]);
+            buckets.add(new Bucket(k, TYPE_MAP.get(k)[0], (int) a[0], a[1]));
+        }
+        if (keys.contains("other")) {
+            long[] a = agg.getOrDefault("other", new long[2]);
+            buckets.add(new Bucket("other", "其他", (int) a[0], a[1]));
+        }
+        long used = 0;
+        for (Bucket b : buckets) used += b.bytes();
+        long trashBytes = 0;
+        int trashFiles = 0;
+        for (long[] a : trash.values()) {
+            trashBytes += a[1];
+            trashFiles += (int) a[0];
+        }
+        // 最占地方的 8 个文件：只算未删的，回收站里的单独算过总量了，
+        // 混进来会让「点它去清」的引导变糊。
+        List<BigFile> big = new ArrayList<>();
+        for (Node n : jdbc.query(
+                "select * from drv_node where owner_id=? and kind='file' and status<>'TRASHED' "
+                        + "order by size desc limit 8", MAPPER, ownerId)) {
+            if (n.size() <= 0) continue;
+            big.add(new BigFile(n.id(), n.name(), n.path(), n.size(), bucketOf(n.name())));
+        }
+        return new StorageBreakdown(quota, quota, used, trashBytes, trashFiles, buckets, big);
     }
 
     /** 递归统计：目录数/文件数/字节。用于验收。 */

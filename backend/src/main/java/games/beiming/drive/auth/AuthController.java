@@ -61,6 +61,30 @@ public class AuthController {
     }
 
     /** 换头像。multipart 单文件，字段名 file。 */
+    public record NicknameReq(@NotBlank @Size(max = 64) String nickname) {
+    }
+
+    public record PasswordReq(@NotBlank String oldPassword,
+                              @NotBlank @Size(min = 8, max = 72) String newPassword) {
+    }
+
+    /** 个人资料详情。比 /me 多一个 createdAt（加入时间）。 */
+    @GetMapping("/profile")
+    public ApiResponse<AuthService.UserView> profile() {
+        return ApiResponse.ok(authService.me(currentUser.require().userId()));
+    }
+
+    @PutMapping("/nickname")
+    public ApiResponse<AuthService.UserView> updateNickname(@Valid @RequestBody NicknameReq req) {
+        return ApiResponse.ok(authService.updateNickname(currentUser.require().userId(), req.nickname()));
+    }
+
+    @PutMapping("/password")
+    public ApiResponse<Void> changePassword(@Valid @RequestBody PasswordReq req) {
+        authService.changePassword(currentUser.require().userId(), req.oldPassword(), req.newPassword());
+        return ApiResponse.ok(null);
+    }
+
     @PostMapping("/avatar")
     public ApiResponse<Map<String, Object>> uploadAvatar(@RequestParam("file") MultipartFile file) {
         long uid = currentUser.require().userId();
