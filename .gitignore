@@ -18,3 +18,11 @@ now-*.png
 show-*.png
 shot-*.png
 *.bak
+
+# 本机调试产物：脚本会把访问令牌写到这里（cache/*.txt），
+# 一旦被 `git add -A` 顺手带进仓库，令牌就跟着进历史了。
+# 两个已跟踪的模板（rail_style.txt / rail_tpl.txt）用 ! 例外放行，
+# 不让这条规则把它们从仓库里「隐形删掉」。
+cache/*
+!cache/rail_style.txt
+!cache/rail_tpl.txt
