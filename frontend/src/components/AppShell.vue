@@ -221,6 +221,8 @@ function contentKeyOf(r) {
   if (r.path === '/downloader') return 'downloader'
   if (r.path === '/storage') return 'storage'
   if (r.path === '/profile') return 'profile'
+  if (r.path === '/settings') return 'settings'
+  if (r.path === '/admin/users') return 'admin-users'
   if (r.query.view === 'trash') return 'trash'
   return 'files:' + (r.query.dir || 'root')
 }

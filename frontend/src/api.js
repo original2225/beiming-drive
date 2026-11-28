@@ -122,6 +122,29 @@ export const api = {
   remoteJobs: () => request('/remote/jobs'),
   cancelRemote: (id) => request(`/remote/jobs/${id}/cancel`, { method: 'POST' }),
   deleteRemote: (id) => request(`/remote/jobs/${id}`, { method: 'DELETE' }),
+
+  // --- 账号与设置（AccountController） ---
+  accountProfile: () => request('/account/profile'),
+  updateAccountProfile: (body) =>
+    request('/account/profile', { method: 'PUT', body }),
+
+  securityQuestions: () => request('/account/security-questions'),
+  setSecurityQuestions: (items) =>
+    request('/account/security-questions', { method: 'PUT', body: items }),
+
+  devices: () => request('/account/devices'),
+  revokeOtherDevices: () => request('/account/devices/revoke-others', { method: 'POST' }),
+  revokeDevice: (id) => request(`/account/devices/${id}`, { method: 'DELETE' }),
+
+  // --- 用户管理（管理员 / 超管） ---
+  listUsers: (keyword) =>
+    request('/account/users' + (keyword ? `?keyword=${encodeURIComponent(keyword)}` : '')),
+  changeUserRole: (id, role) =>
+    request(`/account/users/${id}/role`, { method: 'PUT', body: { role } }),
+  setUserStatus: (id, status) =>
+    request(`/account/users/${id}/status`, { method: 'PUT', body: { status } }),
+  setUserQuota: (id, quota) =>
+    request(`/account/users/${id}/quota`, { method: 'PUT', body: { quota } }),
 };
 
 export function downloadUrl(id) {

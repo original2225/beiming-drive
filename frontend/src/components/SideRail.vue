@@ -59,8 +59,14 @@
                 <span>用户信息</span>
               </button>
               <button class="rail-item" @click="railMenuAction('settings')">
-                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.1" /><path d="M12 3.6v2.6M12 17.8v2.6M20.4 12h-2.6M6.2 12H3.6M18 6l-1.8 1.8M7.8 16.2L6 18M18 18l-1.8-1.8M7.8 7.8L6 6" /></svg>
+                <svg viewBox="0 0 24 24"><path d="M12 3.6v2.6M12 17.8v2.6M20.4 12h-2.6M6.2 12H3.6M18 6l-1.8 1.8M7.8 16.2L6 18M18 18l-1.8-1.8M7.8 7.8L6 6" /><circle cx="12" cy="12" r="3.1" /></svg>
                 <span>设置</span>
+              </button>
+              <!-- 用户管理只给管理员看。前端藏起来是为了不误导，
+                   真正的闸门在后端 AccountController.requireAdmin()。 -->
+              <button v-if="isStaff" class="rail-item" @click="railMenuAction('adminUsers')">
+                <svg viewBox="0 0 24 24"><circle cx="9" cy="8.2" r="3.1" /><path d="M2.8 19c.8-3.2 3.2-5 6.2-5s5.4 1.8 6.2 5" /><circle cx="17.5" cy="9.5" r="2.4" /><path d="M15.6 14.4c2.6.2 4.6 1.9 5.4 4.6" /></svg>
+                <span>用户管理</span>
               </button>
               <button class="rail-item" @click="railMenuAction('theme')">
                 <svg viewBox="0 0 24 24"><path d="M12 3.8a8.2 8.2 0 1 0 0 16.4 2 2 0 0 0 0-4 1.4 1.4 0 0 1 0-2.8h3.6A4.6 4.6 0 0 0 20.2 9 8.2 8.2 0 0 0 12 3.8z" /></svg>
@@ -137,6 +143,10 @@ const barPct = computed(() => {
   return Math.min(100, (m.storageUsed / m.storageQuota) * 100)
 })
 
+/// 是不是后台员工（超管/管理员）。只用来决定「用户管理」这一项显不显示，
+/// 真正的权限判断在后端 —— 前端藏起来只是不误导，不是安全边界。
+const isStaff = computed(() => me.value?.role === 'SUPER_ADMIN' || me.value?.role === 'ADMIN')
+
 function clear() {
   keyword.value = ''
   emit('search', '')
@@ -181,7 +191,8 @@ async function doLogout() {
 
 function railMenuAction(kind) {
   if (kind === 'profile') { router.push('/profile'); open.value = false; return }
-  if (kind === 'settings') { router.push('/profile'); open.value = false; return }
+  if (kind === 'settings') { router.push('/settings'); open.value = false; return }
+  if (kind === 'adminUsers') { router.push('/admin/users'); open.value = false; return }
   if (kind === 'theme') { showToast('主题切换还在做'); return }
   if (kind === 'switch') {
     if (confirm('切换会退出当前账号，回到登录页重新登录。确定吗？')) doLogout()

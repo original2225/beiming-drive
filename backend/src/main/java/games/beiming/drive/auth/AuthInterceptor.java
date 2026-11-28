@@ -46,7 +46,8 @@ public class AuthInterceptor implements HandlerInterceptor {
         if (!authService.sessionAlive(p.tokenId())) {
             throw new DriveException(ErrorCode.UNAUTHORIZED);
         }
-        req.setAttribute(ATTR_PRINCIPAL, new CurrentUser.Auth(p.userId(), p.role(), p.tokenId()));
+        req.setAttribute(ATTR_PRINCIPAL, new CurrentUser.Auth(
+                p.userId(), games.beiming.drive.auth.Role.of(p.role()), p.tokenId()));
         return true;
     }
 }

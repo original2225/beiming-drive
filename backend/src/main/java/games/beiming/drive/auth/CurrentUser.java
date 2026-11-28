@@ -13,10 +13,19 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 @Component
 public class CurrentUser {
 
-    public record Auth(long userId, String role, String tokenId) {
-        public boolean isAdmin() {
-            return "ADMIN".equals(role);
-        }
+    /**
+     * 当前请求的身份。role 一律以 {@link Role} 判定，别再在业务代码里
+     * 写 {@code "ADMIN".equals(...)} —— 散在各处的字符串比较加角色时会漏改。
+     */
+    public record Auth(long userId, Role role, String tokenId) {
+
+        /** 系统级权限（维护接口、全站数据、改别人配额） */
+        public boolean isAdmin() { return role != null && role.isAdmin(); }
+
+        /** 能不能指派/收回管理员 —— 只有超管 */
+        public boolean canManageAdmins() { return role != null && role.canManageAdmins(); }
+
+        public Role role() { return role == null ? Role.GUEST : role; }
     }
 
     public Auth require() {

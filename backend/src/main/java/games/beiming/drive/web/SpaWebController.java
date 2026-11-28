@@ -78,7 +78,7 @@ public class SpaWebController {
      *
      *  加页面时同步检查三处：main.js 的 routes、这里、以及 AppShell 的 contentKeyOf。 */
     @GetMapping({"/", "/index.html", "/login", "/shares", "/downloader",
-            "/storage", "/profile", "/s/*"})
+            "/storage", "/profile", "/settings", "/admin/users", "/s/*"})
     public void index(HttpServletResponse res) throws IOException {
         send(res, dist == null ? null : dist.resolve("index.html"));
     }

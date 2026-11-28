@@ -50,12 +50,19 @@ public class AuthService {
             rs.getString("status"),
             rs.getTimestamp("created_at").toInstant());
 
-    /** 首个注册用户自动成为 ADMIN，方便本机自举。 */
+    /**
+     * 注册即成为普通用户（Role.defaultForSignup()），不需要邀请码。
+     *
+     * 但库还空着的时候，第一个注册的人升为 SUPER_ADMIN —— 否则没人有权
+     * 指派管理员，系统就再也升不出第二个超管了。这只是一次性的自举，
+     * 之后注册的一律是 USER。
+     */
     @Transactional
     public LoginResult register(String email, String nickname, String password) {
         Long existing = jdbc.queryForObject(
                 "select count(*) from drv_user", Long.class);
-        boolean first = existing != null && existing == 0;
+        boolean empty = existing == null || existing == 0;
+        Role role = empty ? Role.SUPER_ADMIN : Role.defaultForSignup();
 
         String hash = hasher.encode(password);
         KeyHolder kh = new GeneratedKeyHolder();
@@ -66,7 +73,7 @@ public class AuthService {
             ps.setString(1, email);
             ps.setString(2, nickname);
             ps.setString(3, hash);
-            ps.setString(4, first ? "ADMIN" : "USER");
+            ps.setString(4, role.name());
             return ps;
         }, kh);
 

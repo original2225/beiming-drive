@@ -8,6 +8,8 @@ import Shares from './pages/Shares.vue'
 import Downloader from './pages/Downloader.vue'
 import Storage from './pages/Storage.vue'
 import Profile from './pages/Profile.vue'
+import Settings from './pages/Settings.vue'
+import AdminUsers from './pages/AdminUsers.vue'
 import ShareView from './pages/ShareView.vue'
 import { getToken } from './api.js'
 
@@ -20,6 +22,8 @@ const router = createRouter({
     { path: '/downloader', component: Downloader },
     { path: '/storage', component: Storage },
     { path: '/profile', component: Profile },
+    { path: '/settings', component: Settings },
+    { path: '/admin/users', component: AdminUsers },
     { path: '/s/:id', component: ShareView, meta: { public: true } },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
