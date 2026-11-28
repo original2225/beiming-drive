@@ -32,21 +32,16 @@
                改成横向电池：百分比写在电池里，数字右边挂一个状态图标。 -->
           <button class="mini-battery" :class="batLevel" :title="batTip"
                   @click="router.push('/storage')">
-            <span class="bat-shell">
-              <span class="bat-fill" :style="{ width: barWidth }"></span>
+            <!-- 一颗透明电池：内部不填色，占用率只从「边框渐变到哪一格」读出来。
+                 框内写已用百分比 —— 收起态空间太小放不下外部文字，
+                 数字就压在电池肚子里。 -->
+            <span class="bat-shell" :style="batShellStyle">
+              <!-- 电流：从左侧流进来的能量条，只占已用比例那么长 -->
+              <span class="bat-current" :style="batCurrentStyle">
+                <i class="spark s1"></i><i class="spark s2"></i><i class="spark s3"></i>
+              </span>
               <span class="bat-label">
-                <span class="bat-num">{{ batText }}<i>%</i></span>
-                <!-- 绿叶 / 闪电，按花蝉原话「比如电能，绿叶什么的」。
-                     语义靠剩余量走：余量充足是绿叶（松口气），
-                     开始吃紧是闪电（有点紧张），见底是红闪电。
-                     这里刻意不追求「图标语义精确」，要的是有生气、扫一眼有情绪。 -->
-                <svg v-if="batIcon === 'leaf'" class="bat-ico" viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M5 19c0-8 6-14 15-14 0 9-6 15-14 15" />
-                  <path d="M5 19c3-4 7-7 11-9" />
-                </svg>
-                <svg v-else class="bat-ico" viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M13 3L5 13.5h5.5L10 21l8-10.5h-5.5L13 3z" />
-                </svg>
+                <span class="bat-num">{{ usedPctText }}<i>%</i></span>
               </span>
             </span>
           </button>
@@ -120,23 +115,15 @@
             <span>存储空间</span>
             <span class="quota-go">›</span>
           </div>
-          <div class="quota-bat" :class="batLevel">
-            <span class="quota-fill" :style="{ width: barWidth }"></span>
-            <span class="quota-label">
-              <span class="quota-pct">{{ batText }}<i>%</i></span>
-              <span class="quota-free">剩 {{ freeText }}</span>
-              <svg v-if="batIcon === 'leaf'" class="quota-ico" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M5 19c0-8 6-14 15-14 0 9-6 15-14 15" />
-                <path d="M5 19c3-4 7-7 11-9" />
-              </svg>
-              <svg v-else class="quota-ico" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M13 3L5 13.5h5.5L10 21l8-10.5h-5.5L13 3z" />
-              </svg>
+          <div class="quota-bat" :class="batLevel" :style="batShellStyle">
+            <span class="bat-current" :style="batCurrentStyle">
+              <i class="spark s1"></i><i class="spark s2"></i><i class="spark s3"></i><i class="spark s4"></i>
             </span>
           </div>
+          <!-- 展开态数字放在框外：框内部只留给电流，不被字盖住 -->
           <div class="quota-num">
-            <span class="quota-used">已用 {{ usedText }}</span>
-            <span class="quota-total">共 {{ quotaText }}</span>
+            <span class="quota-used">已用 {{ usedPctText }}%</span>
+            <span class="quota-total">{{ usedText }} / {{ quotaText }}</span>
           </div>
         </button>
       </div>
@@ -331,47 +318,55 @@ const pct = computed(() => {
   const p = (me.value?.storageUsed / me.value?.storageQuota) * 100 || 0
   return p > 0 ? p.toFixed(1) : '0.0'
 })
-/* 剩余空间百分比：电池整套显示逻辑都基于它，不是已用比例 */
-const freePct = computed(() => {
+/// 已用百分比 —— 电池整套显示逻辑都基于它。
+/// 之前用的是「剩余」，但电池框该表达的是「被占掉多少」：
+/// 占得越多框越满、颜色越危险，和「存了多少东西」直接对应。
+const usedPct = computed(() => {
   const q = me.value?.storageQuota || 0
-  if (!q) return 100
-  const p = 100 - ((me.value?.storageUsed || 0) / q) * 100
+  if (!q) return 0
+  const p = ((me.value?.storageUsed || 0) / q) * 100
   return Math.max(0, Math.min(100, p))
 })
 
-/* 电池上的数字：显示「还剩多少」而不是「用了多少」。
-   这是电池这个图形的语义 —— 满格=有空间，空格=快满了。
-   原来显示已用比例，结果 0% 已用配一个空电池 + 绿叶，自己和自己打架
-   （0% 已用其实是空间全满、最健康的状态）。
-   不足 1% 剩余时显示 <1，避免圆整成 0 让人以为一点不剩。 */
-const batText = computed(() => {
-  const p = freePct.value
-  if (p >= 100) return '100'
+/* 电池上的数字：不足 1% 显示 <1，不圆整成 0。
+   新账号 9.8KB / 50GB 真实值 0.02%，显示 0% 会让人以为一点没存。 */
+const usedPctText = computed(() => {
+  const p = usedPct.value
   if (p > 0 && p < 1) return '<1'
   return Math.round(p)
 })
 
-/* 电池填充宽度 = 剩余比例。给 8% 下限：剩余极少时也要看得见一格，
-   否则像渲染坏了而不是「快用完了」。 */
-const barWidth = computed(() => {
-  const p = freePct.value
-  return p <= 0 ? '0%' : Math.max(p, 8).toFixed(1) + '%'
+/* 框内电流的长度 = 已用比例。
+   下限 6%：只剩一丝时也要看得见，否则像渲染坏了。 */
+const batCurrentStyle = computed(() => {
+  const p = usedPct.value
+  return { width: p <= 0 ? '0%' : Math.max(p, 6).toFixed(1) + '%' }
 })
 
-/* 三档状态：图标和配色都跟着剩余量走。
-   · leaf  绿叶 —— 余量充足（剩余超过 40%）
-   · bolt  闪电 —— 过半在用（剩余 15%~40%）
-   · alarm 红色闪电 —— 快满了（剩余不到 15%） */
+/* 边框渐变：从蓝到紫，一直铺满整圈（不是只铺到已用比例）。
+   为什么渐变铺满而不是铺到已用位置 —— 边框是「容器」的形状，
+   截断的边框看起来像破了。占用率由「电流条流到哪」+ 颜色档位表达。 */
+const batShellStyle = computed(() => {
+  const p = usedPct.value
+  // 占用越高，渐变越往后取（蓝 → 靛 → 紫 → 琥珀 → 红）
+  const angle = 100 + p * 1.4          // 100deg ~ 240deg，让渐变方向随占用缓变
+  return { '--bat-angle': angle.toFixed(0) + 'deg' }
+})
+
+/* 三档配色：颜色说的是「占了多少」，不是「还剩多少」。
+   · normal 蓝紫 —— 用得少
+   · warn   琥珀 —— 过半了（60% 以上）
+   · full   红   —— 快满（85% 以上） */
 const batLevel = computed(() => {
-  const p = freePct.value
-  if (p < 15) return 'is-full'
-  if (p < 40) return 'is-warn'
+  const p = usedPct.value
+  if (p >= 85) return 'is-full'
+  if (p >= 60) return 'is-warn'
   return ''
 })
-const batIcon = computed(() => (freePct.value < 40 ? 'bolt' : 'leaf'))
+
 const freeText = computed(() => sizeText((me.value?.storageQuota || 0) - (me.value?.storageUsed || 0)))
 const batTip = computed(() =>
-  `还剩 ${sizeText((me.value?.storageQuota || 0) - (me.value?.storageUsed || 0))} / 共 ${quotaText.value}，已用 ${pct.value}%`)
+  `已用 ${usedText.value} / 共 ${quotaText.value}（${pct.value}%），还剩 ${freeText.value}`)
 </script>
 
 <style scoped>
@@ -506,11 +501,12 @@ const batTip = computed(() =>
              align-items: stretch; gap: 10px; padding-top: 6px; }
 .mini-foot .mini-toggle { margin: 0 auto; }
 
-/* ---- 电池：收起态的存储指示（横向）----
-   百分比写在电池内部右侧，数字末尾挂状态图标。
-   为什么横放：竖电池在 48px 宽的条里只能占 16px，剩下的宽度全浪费；
-   横过来之后百分比和图标都能塞进电池里，一个元素说清三件事
-   （用了多少 / 还剩多少 / 健不健康）。 */
+/* ---- 电池：收起态的存储指示（横向，透明内部）----
+   一件事只由一个视觉变量说：
+   · 边框颜色 = 占用了多少（蓝 → 紫 → 琥珀 → 红）
+   · 框内电流条长度 = 已用百分比
+   · 框内文字 = 已用百分比数字（收起态空间不够放外面）
+   内部刻意不填底色 —— 填了就会盖住电流的走向和流动感。 */
 .mini-battery {
   border: 0; background: transparent; cursor: pointer;
   padding: 0; display: block; width: 100%;
@@ -519,76 +515,113 @@ const batTip = computed(() =>
 }
 .mini-battery:hover { transform: translateY(-1px); }
 
-/* ---- 电池：收起态的存储指示（横向）----
-   只有一层外框 + 大圆角。以前里面还套了个白色小胶囊装数字，
-   那等于在框里又画了一个框，看着"厚"。现在数字直接压在填充上，
-   靠白色文字描边保证任何底色下都读得清。 */
+/* 渐变边框的做法：两层叠加。
+   外层是 conic 渐变当「颜料」，内层用背景色挖空中心，
+   只剩 1.5px 的边 —— 这样边框本身就是渐变，且内部是透明的。
+   直接用 border-image 会让 4 个圆角断掉（border-image 不跟 border-radius）。 */
 .bat-shell {
   position: relative;
   display: flex; align-items: center; justify-content: center;
   width: 100%; height: 24px;
-  border: 1.5px solid #ccd2e4; border-radius: 9px;
-  overflow: hidden;
-  transition: border-color .2s ease;
+  border-radius: 9px;
+  padding: 1.5px;                 /* 这就是边框粗细 */
+  background: conic-gradient(from var(--bat-angle, 120deg),
+              #6f8bff, #9a7cf8, #6f8bff, #9a7cf8, #6f8bff);
+  overflow: visible;              /* 正极要露在右边 */
+  transition: background .5s ease;
 }
-/* 电池正极：横向后长在右边。
-   注意挂在 .mini-battery 上而不是 .bat-shell 上 ——
-   电池框为裁住填充圆角设了 overflow:hidden，任何贴边的伪元素都会被一起裁掉。
-   所以电池框用 margin-right 让出 4px，正极画在外层这个空隙里。 */
-.bat-shell { margin-right: 4px; }
+.bat-shell::before {
+  content: '';
+  position: absolute; inset: 1.5px;
+  border-radius: 7.5px;
+  background: #fff;               /* 挖空中心 = 内部透明（白底上的透明） */
+}
+/* 电池正极：横向后长在右边。挂在外层，避开 overflow */
 .mini-battery::after {
   content: '';
   position: absolute; right: 0; top: 50%; transform: translateY(-50%);
   width: 3px; height: 8px;
-  background: #c8cee0; border-radius: 1px 3px 3px 1px;
-  transition: background .2s ease;
+  border-radius: 1px 3px 3px 1px;
+  background: conic-gradient(from var(--bat-angle, 120deg), #6f8bff, #9a7cf8, #6f8bff);
+  transition: background .5s ease;
 }
-.mini-battery.is-full::after { background: #e88d80; }
-.bat-fill {
-  position: absolute; left: 0; top: 0; bottom: 0;
-  border-radius: 3px;
-  background: linear-gradient(90deg, #7b8bfa, #5b76f7);
-  transition: width .55s cubic-bezier(.3,.55,.4,.95), background .3s ease;
+
+/* 电流：从左侧流进来的能量条。宽度 = 已用比例。
+   不是纯色块 —— 里面有 3~4 个小光点沿 x 轴循环游走，看着像电流在流。
+   z-index 1 必须给：挖空用的 ::before 是伪元素，默认叠在普通子元素之上，
+   不给层级电流就被白底盖住了。
+   加一圈同色系描边（inset shadow）而不是填更深的底色：
+   橙黄/浅紫在纯白上本来就淡，加深底色会把"透明感"做没；
+   描边只压边缘，中间仍然透，但边界一下子清楚。 */
+.bat-current {
+  position: absolute; left: 2px; top: 2px; bottom: 2px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: linear-gradient(90deg,
+              rgba(111,139,255,.62), rgba(154,124,248,.72));
+  box-shadow: inset 0 0 0 1px rgba(111,139,255,.55);
+  transition: width .55s cubic-bezier(.3,.55,.4,.95), background .4s ease,
+              box-shadow .4s ease;
+  z-index: 1;
+  /* 右端斜切的宽度用 min(5px, 2%) 自适应：
+     满格时末端已经贴到框的圆角上，再切 5px 就会在右下角露一块缺口
+     （实测 100% 时确实露了）。用 min() 让它在左右空间不够时自动缩到 0，
+     等于满格时自然退回圆角，不需要额外加类判断。 */
+  clip-path: polygon(0 0, calc(100% - min(5px, 2%)) 0, 100% 50%,
+                     calc(100% - min(5px, 2%)) 100%, 0 100%);
 }
-/* 数字 + 图标：直接压在填充上，不再套内层白框。
-   描边只留一层极轻的（16 层光晕会糊成一团，实测观感像早年彩字），
-   真正保证可读性的是深色字本身 —— 蓝/琥珀/红三种填充都够深。 */
+
+/* 数字压在电流上面 */
 .bat-label {
   position: relative; z-index: 2;
   display: flex; align-items: center; gap: 3px;
   font-size: 10.5px; font-weight: 700; line-height: 1;
   color: #0f1526;
   font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 1px rgba(255,255,255,.55);
+  text-shadow: 0 0 3px rgba(255,255,255,.9), 0 1px 2px rgba(255,255,255,.8);
 }
 .bat-num i { font-style: normal; font-size: 8px; font-weight: 600; opacity: .8; }
-.bat-ico {
-  /* 9px 而不是 11：实测 11px 时图标高度 (11) 已经超过数字的 10.5，
-     视觉上和数字抢主角，叶子显得笨。9px 约等于文字高度的 0.85，
-     图标退成"注脚"的位置，数字才是主体。 */
-  width: 9px; height: 9px; flex-shrink: 0;
-  fill: none; stroke: currentColor;
-  stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round;
-  transition: stroke .25s ease, transform .3s ease;
+
+/* 光点：沿电流方向循环游走。用 translateX + opacity，
+   不用 background-position（在窄条里会跳格）。 */
+.spark {
+  position: absolute; top: 0; bottom: 0;
+  width: 14px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.85), transparent);
+  filter: blur(.5px);
+  animation: spark-run 2.6s linear infinite;
 }
-/* 图标单独上色，不跟文字走 —— 要的就是「生动」：
-   绿叶是绿的、闪电是琥珀的、见底是红的。
-   形状和颜色同时变，不用读数字也能感到「还宽裕 / 有点紧 / 该清理了」。 */
-.mini-battery .bat-ico { stroke: #2ea86a; }
-.mini-battery.is-warn .bat-ico { stroke: #f0912b; }
-.mini-battery.is-full .bat-ico { stroke: #e2574a; }
-/* 悬停时叶子轻轻摇一下，闪电微微放大 —— 让图标显得是活的 */
-.mini-battery:hover .bat-ico { transform: rotate(-10deg) scale(1.12); }
-.mini-battery.is-warn:hover .bat-ico,
-.mini-battery.is-full:hover .bat-ico { transform: scale(1.15); }
+.spark.s1 { animation-delay: 0s; }
+.spark.s2 { animation-delay: .65s; width: 8px; opacity: .8; }
+.spark.s3 { animation-delay: 1.3s; width: 18px; opacity: .65; }
+.spark.s4 { animation-delay: 1.95s; width: 6px; opacity: .9; }
+@keyframes spark-run {
+  0%   { transform: translateX(-20px); opacity: 0; }
+  18%  { opacity: 1; }
+  82%  { opacity: 1; }
+  100% { transform: translateX(260px); opacity: 0; }
+}
 
-/* 60% 以下剩余：琥珀色 —— 空间开始紧 */
-.mini-battery.is-warn .bat-fill { background: linear-gradient(90deg, #f8b64c, #f0912b); }
-.mini-battery.is-warn .bat-shell { border-color: #f0cf9a; }
-
-/* 剩余 15% 以下：满格红 */
-.mini-battery.is-full .bat-fill { background: linear-gradient(90deg, #f0836f, #e2574a); }
-.mini-battery.is-full .bat-shell { border-color: #f0b3aa; }
+/* 三档配色：占用越高边框越往暖色走。
+   边框和正极用同一套渐变，保证是「同一根管子」。 */
+.mini-battery.is-warn .bat-shell,
+.mini-battery.is-warn::after {
+  background: conic-gradient(from var(--bat-angle, 160deg),
+              #f5c05c, #f0912b, #f5c05c, #f0912b, #f5c05c);
+}
+.mini-battery.is-warn .bat-current {
+  background: linear-gradient(90deg, rgba(245,192,92,.62), rgba(240,145,43,.72));
+  box-shadow: inset 0 0 0 1px rgba(232,145,43,.62);
+}
+.mini-battery.is-full .bat-shell,
+.mini-battery.is-full::after {
+  background: conic-gradient(from var(--bat-angle, 200deg),
+              #f0836f, #e2574a, #f0836f, #e2574a, #f0836f);
+}
+.mini-battery.is-full .bat-current {
+  background: linear-gradient(90deg, rgba(240,131,111,.62), rgba(226,87,74,.74));
+  box-shadow: inset 0 0 0 1px rgba(226,87,74,.66);
+}
 
 .mini-toggle {
   width: 30px; height: 30px; border-radius: 9px;
@@ -701,48 +734,55 @@ const batTip = computed(() =>
 }
 .quota:hover .quota-go { opacity: 1; transform: translateX(0); }
 .quota-top { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 8px; }
-/* 展开态的存储条 = 收起态电池的放大版。
-   同一套视觉语言：一层大圆角外框 + 填充 + 压在里面的数字，
-   只是这里宽度够，能多带「剩 X」和用量明细。
-   颜色和图标都走同一个 batLevel / batIcon，两处永远不会不一致。 */
+/* 展开态的存储条 = 收起态电池的放大版，同一套视觉语言：
+   透明内部、渐变边框、框内电流。差别只在体积和「数字放外面」——
+   展开后横向空间够，数字挪出去，框里就能完整看到电流在流。 */
 .quota-bat {
   position: relative;
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: center;
   height: 30px;
-  border: 1.5px solid #ccd2e4; border-radius: 11px;
-  overflow: hidden;
-  transition: border-color .2s ease;
+  border-radius: 11px;
+  padding: 1.5px;
+  background: conic-gradient(from var(--bat-angle, 120deg),
+              #6f8bff, #9a7cf8, #6f8bff, #9a7cf8, #6f8bff);
+  overflow: visible;
+  transition: background .5s ease;
 }
-.quota-fill {
-  position: absolute; left: 0; top: 0; bottom: 0;
-  background: linear-gradient(90deg, #7b8bfa, #5b76f7);
-  transition: width .55s cubic-bezier(.3,.55,.4,.95), background .3s ease;
+.quota-bat::before {
+  content: '';
+  position: absolute; inset: 1.5px;
+  border-radius: 9.5px;
+  background: #fff;
 }
-.quota-label {
-  position: relative; z-index: 2;
-  display: flex; align-items: center; gap: 5px;
-  font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 2px rgba(255,255,255,.6);
+/* 正极 */
+.quota-bat::after {
+  content: '';
+  position: absolute; right: -4px; top: 50%; transform: translateY(-50%);
+  width: 4px; height: 10px;
+  border-radius: 1px 3px 3px 1px;
+  background: conic-gradient(from var(--bat-angle, 120deg), #6f8bff, #9a7cf8, #6f8bff);
+  transition: background .5s ease;
 }
-.quota-pct { font-size: 13px; font-weight: 700; color: #0f1526; }
-.quota-pct i { font-style: normal; font-size: 9.5px; font-weight: 600; opacity: .8; }
-.quota-free { font-size: 11px; font-weight: 600; color: #364063; opacity: .9; }
-.quota-ico {
-  width: 12px; height: 12px; flex-shrink: 0;
-  fill: none; stroke: currentColor;
-  stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round;
-  transition: transform .3s ease;
-}
-.quota:hover .quota-ico { transform: rotate(-10deg) scale(1.12); }
+.quota-bat .bat-current { left: 3px; top: 3px; bottom: 3px; border-radius: 8px;
+  clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 50%, calc(100% - 6px) 100%, 0 100%); }
 
-/* 三档配色，和收起态一一对应 */
-.quota-bat .quota-ico { stroke: #2ea86a; }
-.quota-bat.is-warn .quota-fill { background: linear-gradient(90deg, #f8b64c, #f0912b); }
-.quota-bat.is-warn .quota-ico { stroke: #f0912b; }
-.quota-bat.is-warn { border-color: #f0cf9a; }
-.quota-bat.is-full .quota-fill { background: linear-gradient(90deg, #f0836f, #e2574a); }
-.quota-bat.is-full .quota-ico { stroke: #e2574a; }
-.quota-bat.is-full { border-color: #f0b3aa; }
+/* 三档：和收起态一一对应 */
+.quota-bat.is-warn,
+.quota-bat.is-warn::after {
+  background: conic-gradient(from var(--bat-angle, 160deg),
+              #f5c05c, #f0912b, #f5c05c, #f0912b, #f5c05c);
+}
+.quota-bat.is-warn .bat-current {
+  background: linear-gradient(90deg, rgba(245,192,92,.62), rgba(240,145,43,.74));
+}
+.quota-bat.is-full,
+.quota-bat.is-full::after {
+  background: conic-gradient(from var(--bat-angle, 200deg),
+              #f0836f, #e2574a, #f0836f, #e2574a, #f0836f);
+}
+.quota-bat.is-full .bat-current {
+  background: linear-gradient(90deg, rgba(240,131,111,.42), rgba(226,87,74,.54));
+}
 .quota-num {
   display: flex; justify-content: space-between; align-items: baseline;
   font-size: 12px; color: var(--ink-2); margin-top: 7px;
