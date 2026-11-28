@@ -682,15 +682,18 @@ onMounted(loadMe)
          stroke: var(--ink-2); stroke-width: 1.9; stroke-linecap: round; }
 .rail-search.is-open .rs-ic { width: 17px; height: 17px; stroke: var(--ink-3); }
 
-/* 输入框：收起时宽 0、透明、点不到也 tab 不到 */
+/* 输入框：收起时宽 0、透明、点不到也 tab 不到。
+   注意 flex 必须同时归零：只写 width:0 时 flex-grow:1 仍会占掉圆内的
+   剩余宽度，把放大镜顶到左边（实测图标中心偏左 9px）。 */
 .rail-search input {
-  flex: 1 1 auto; min-width: 0; width: 0;
+  flex: 0 0 0; min-width: 0; width: 0;
   border: 0; outline: 0; background: transparent;
   font-size: 14px; color: var(--ink); padding: 0;
   opacity: 0; pointer-events: none;
   transition: opacity .2s ease, width var(--rail-dur) var(--rail-ease);
 }
 .rail-search.is-open input {
+  flex: 1 1 auto;
   width: auto; opacity: 1; pointer-events: auto;
   transition: opacity .2s ease .1s, width var(--rail-dur) var(--rail-ease);
 }
