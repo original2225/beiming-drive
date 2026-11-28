@@ -3,17 +3,42 @@
 > **交接用法**：开新会话第一句说「先读 README.md 和 PROJECT_MEMORY.md，只看最新一节，然后做 <具体下一步>，别动其他模块」。README 讲**怎么用/怎么部署**，本文件讲**做到哪、为什么这么做、接下来做什么**。
 > 每完成一块完整功能就往下追加一节（格式见文末）。上下文到 10 万 token 左右就换会话。
 
-## 一句话现状（更新于 2026-11-28 晚）
+## 一句话现状（更新于 2026-11-28 22:55）
 
-自研网盘（不是 Cloudreve 换皮）主功能已闭环：登录、文件树、上传下载、sha256 分卷去重、在线预览、分享、回收站、专属多线程下载器、自研站内搜索、右侧竖栏 + 新建菜单、四角色权限模型 + 独立设置页 + 用户管理页、**右栏下载记录与收藏夹**、**安全问题找回密码**。回收站 30 天自动清理 + 孤儿 blob 回收已完成并上线。全部提交已 push 到 origin。
+自研网盘（不是 Cloudreve 换皮）主功能已闭环：登录、文件树、上传下载、sha256 分卷去重、在线预览、分享、回收站、专属多线程下载器、自研站内搜索、右侧竖栏 + 新建菜单、四角色权限模型 + 独立设置页 + 用户管理页、右栏下载记录与收藏夹、安全问题找回密码、**共享目录树 + 四档节点权限（ACL）**。回收站 30 天自动清理 + 孤儿 blob 回收已完成并上线。全部提交已 push 到 origin。
 
-## 收工状态（2026-11-28 19:30，本轮「右栏两个模块 + 找回密码」收工）
+## 收工状态（2026-11-28 22:55，本轮「共享目录树 + ACL 权限」收工）
 
-- 分支 `main`，**HEAD `6b652d0`，已推送 origin/main**
-- 迁移已应用到 **V7**（V6 下载记录 + 收藏、V7 密码重置票 + 失败记录）
-- 线上库只剩两个真实账号（`admin@beiming.local` 超管、`1578086557@qq.com` 用户）
-- 端到端：`cache/verify_marks.py` **24/24**、`cache/verify_reset.py` **27/27**
+- 分支 `main`，**HEAD `c207f7e`，已推送 origin/main**
+- 迁移已应用到 **V8**（共享单根 + `/昵称` + `drv_node_acl` + path 全局唯一）
+- 线上库两个真实账号（`admin@beiming.local` 超管、`1578086557@qq.com` 用户），60 个节点
+- 端到端：`cache/verify_acl.py` **10/10**、`verify_marks.py` **24/24**、`verify_roles.py` **35/35**、`verify_reset.py` **27/27**
 - 容器 `drive-app` 健康 UP
+
+### 本轮新增的坑（都会再犯）
+
+1. **V8 迁移 4.2 段把新建的根自己也改了**。用 `c.owner_id=(select owner_id ...)` 匹配子孙时，新根 owner_id 和旧根一样，于是被拼成 `/花蝉/`。修法：加 `AND c.is_root = false`。**不能比 id，新根 id 是运行时才知道的。**
+2. **改过 `V8__*.sql` 之后 Flyway 会 checksum mismatch** 导致容器 `Restarting (1)`。把 checksum 置 null 没用（Flyway 会重算再比）。正确做法：按 Flyway 算法算真值写进 `flyway_schema_history`——
+   ```python
+   crc=0
+   for line in text.splitlines(): crc = zlib.crc32(line.encode('utf-8'), crc)
+   val = crc-(1<<32) if crc>=(1<<31) else crc
+   ```
+3. **注册流程会建根节点，共享树里第二个用户必撞全局唯一 path → 500**。`AuthService.register` 里那两行必须删。
+4. **`TRUNCATE drv_node` 后不能直接 psql 灌 pg_dump 全文件**（77 个 ERROR，表结构冲突）。只抽 `COPY public.drv_node` 那一段灌，且要先 `DROP` 掉 V8 建的索引/表/列，否则旧全局唯一索引挡住重名 path。
+5. **CSS 变量名猜错不会报错，颜色全塌**。本项目变量定义在 `frontend/index.html` 的 `:root`，是 `--ink/--ink-2/--ink-3/--brand/--brand-soft/--line/--bg/--card`。没有 `--fg-*`、`--panel-*`、`--accent*`。
+6. **`/auth/me` 返回的 UserView 没有 role**。要判管理员得另问 `/account/profile`（有 `role`），`api.js` 里是 `accountProfile()`。用户列表是 `listUsers(kw)` 不是 `adminUsers()`。
+
+### 权限模型的最终语义（改之前先看这段）
+
+- **全站一棵树**，`path` 全局唯一，每个用户挂在 `/<昵称>` 下（撞名加 `_2`）。
+- 查权限：从节点往上找**最近**一条规则，命中即停（就近覆盖，不是取并集——并集没法收紧）。
+- 根节点：`everyone = 浏览✓ 预览✗ 下载✗ 上传✓`。
+- 个人目录：本人全权 + `everyone` **全禁**（否则继承根的全员可上传，谁都能往别人家塞文件）。
+- **新建目录只给建者全权，不写 everyone**。写死 `everyone=NONE` 会把管理员建的公共目录关死。
+- **上传者对自己上传的节点恒有全权**（`owner_id` 命中即 `Perm.ALL`）。否则传进公共区的文件本人反而下不了。
+- 管理员/超管走 ACL 旁路（`role.isAdmin()`），不受 ACL 约束。
+- 文件夹只有管理员能建；游客不登录，只能下载公开分享。
 
 ### 本轮新增的四条坑（会再犯）
 
