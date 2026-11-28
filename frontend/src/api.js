@@ -183,6 +183,15 @@ export const api = {
     request(`/admin/nodes/${nodeId}/acl/${userId}`, { method: 'DELETE' }),
   // 问「我对这个节点有什么权限」，前端据此决定按钮显不显示
   myPerm: (nodeId) => request(`/admin/nodes/${nodeId}/my-perm`),
+
+  // --- 注册白名单（管理员） ---
+  // 网盘不开放注册，这里列出谁有注册权
+  listWhitelist: () => request('/admin/register-whitelist'),
+  addWhitelist: ({ pattern, kind, note }) =>
+    request('/admin/register-whitelist', { method: 'POST', body: { pattern, kind, note } }),
+  delWhitelist: (id) => request(`/admin/register-whitelist/${id}`, { method: 'DELETE' }),
+  checkWhitelist: (email) =>
+    request(`/admin/register-whitelist/check?email=${encodeURIComponent(email)}`),
 };
 
 export function downloadUrl(id) {

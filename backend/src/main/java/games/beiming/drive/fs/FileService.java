@@ -206,22 +206,39 @@ public class FileService {
      * LIKE 不能打拼音、不能容错、也没有相关度（只能按时间排）。
      * 回收站不参与 —— 索引里本来就不放 TRASHED 的节点。
      */
-    public List<Node> search(long ownerId, String keyword, int limit) {
+    public List<Node> search(long userId, String keyword, int limit) {
         if (keyword == null || keyword.isBlank()) return List.of();
         if (searchSync == null) return List.of();
 
+        // 共享树之后，索引不再按人隔离（scope 传 null = 搜全站），
+        // 能不能看见改由 ACL 判定 —— 搜得到不等于看得到。
+        //
+        // 注意参数顺序是 (ownerScope, keyword, limit)：scope 在前。
+        // 写反会变成 scope=关键词、keyword=null → 永远返回空，
+        // 而且不报错，只是「搜什么都搜不到」，极难查（实测踩过一次）。
+        boolean admin = isAdmin(userId);
         List<Node> out = new ArrayList<>();
         for (games.beiming.drive.search.SearchIndex.Hit h :
-                searchSync.search(String.valueOf(ownerId), keyword, limit)) {
+                searchSync.search(null, keyword, limit)) {
             Object idObj = h.doc().payload().get("id");
             if (idObj == null) continue;
             long id = Long.parseLong(String.valueOf(idObj));
-            // 回库取当前状态：索引可能比库慢一拍（极小概率），以库为准
+
+            // 回库取当前状态：索引可能比库慢一拍，以库为准
+            Node n;
             try {
-                out.add(byId(ownerId, id));
-            } catch (RuntimeException ignored) {
-                // 索引里有、库里已没（刚删），跳过并顺手清掉
+                n = byIdRaw(id);
+            } catch (RuntimeException gone) {
+                // 真的没了（刚被彻底删除）→ 顺手清掉索引
                 indexRemove(id);
+                continue;
+            }
+
+            // 这里**不能用 byId 的 try/catch 来判断**：它把「无权看」也报成 404，
+            // 一旦按异常分支处理就会把别人没权限的文件从索引里删掉 —— 那是删数据，
+            // 不是过滤结果。所以先确认节点还在，再单独问权限。
+            if (perms.can(userId, id, NodePermissionService.Right.BROWSE, admin)) {
+                out.add(n);
             }
         }
         return out;

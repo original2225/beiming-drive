@@ -20,11 +20,13 @@ public class AuthService {
 
     private final JdbcTemplate jdbc;
     private final JwtService jwt;
+    private final RegisterWhitelistService whitelist;
     private final BCryptPasswordEncoder hasher = new BCryptPasswordEncoder(10);
 
-    public AuthService(JdbcTemplate jdbc, JwtService jwt) {
+    public AuthService(JdbcTemplate jdbc, JwtService jwt, RegisterWhitelistService whitelist) {
         this.jdbc = jdbc;
         this.jwt = jwt;
+        this.whitelist = whitelist;
     }
 
     public record UserRow(long id, String email, String nickname, String passwordHash,
@@ -51,17 +53,31 @@ public class AuthService {
             rs.getTimestamp("created_at").toInstant());
 
     /**
-     * 注册即成为普通用户（Role.defaultForSignup()），不需要邀请码。
+     * 注册即成为普通用户（Role.defaultForSignup()）。
      *
-     * 但库还空着的时候，第一个注册的人升为 SUPER_ADMIN —— 否则没人有权
+     * <p><b>2026-11-28 起注册要过白名单</b>：花蝉定的「只有北冥管理官方有注册权，
+     * 其他人只有使用权」。白名单在 {@link RegisterWhitelistService} 里维护，
+     * 不在表里就 403。
+     *
+     * <p>但库还空着的时候，第一个注册的人升为 SUPER_ADMIN —— 否则没人有权
      * 指派管理员，系统就再也升不出第二个超管了。这只是一次性的自举，
      * 之后注册的一律是 USER。
+     *
+     * <p>先校验白名单再写库：反过来的话，被拒的人已经占掉了一个 id，
+     * 而且万一后面异常，会留下半个账号。
      */
     @Transactional
     public LoginResult register(String email, String nickname, String password) {
         Long existing = jdbc.queryForObject(
                 "select count(*) from drv_user", Long.class);
         boolean empty = existing == null || existing == 0;
+
+        // 库完全空的时候不拦 —— 否则白名单没配、账号又建不出来，机器就锁死了。
+        // 这时第一个人必然是部署这个网盘的人本人。
+        if (!empty) {
+            whitelist.requireAllowed(email);
+        }
+
         Role role = empty ? Role.SUPER_ADMIN : Role.defaultForSignup();
 
         String hash = hasher.encode(password);

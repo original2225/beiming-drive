@@ -74,6 +74,50 @@
       </div>
     </template>
 
+    <!-- 注册白名单：谁能注册这个网盘 -->
+    <template v-if="allowed">
+      <section class="wl-sec">
+        <div class="wl-head">
+          <div>
+            <h2 class="wl-title">注册白名单</h2>
+            <p class="wl-sub">
+              网盘不对外开放注册。这里列出的人才能注册；其他人只有使用权（浏览、下载分享）。
+              QQ 号填纯数字，注册时用该 QQ 邮箱即可。
+            </p>
+          </div>
+        </div>
+
+        <div class="wl-add">
+          <select v-model="wlKind" class="ipt wl-kind">
+            <option value="qq">QQ 号</option>
+            <option value="email">邮箱</option>
+          </select>
+          <input v-model="wlPattern" class="ipt wl-pattern"
+                 :placeholder="wlKind === 'qq' ? '如 1578086557' : '如 someone@example.com'"
+                 @keyup.enter="addWhitelist" />
+          <input v-model="wlNote" class="ipt wl-note" placeholder="备注（可选，如「运维小张」）" />
+          <button class="btn btn-primary btn-sm" :disabled="wlBusy" @click="addWhitelist">
+            添加
+          </button>
+        </div>
+
+        <div v-if="wlErr" class="wl-err">{{ wlErr }}</div>
+
+        <div v-if="whitelist.length" class="wl-list">
+          <div v-for="w in whitelist" :key="w.id" class="wl-row">
+            <span class="wl-badge" :class="w.kind">{{ w.kind === 'qq' ? 'QQ' : '邮箱' }}</span>
+            <span class="wl-val">{{ w.pattern }}</span>
+            <span class="wl-note">{{ w.note || '' }}</span>
+            <button class="btn btn-sm icon-only" title="移除" @click="removeWhitelist(w)">✕</button>
+          </div>
+        </div>
+        <div v-else class="wl-empty">
+          白名单是空的 —— 空表时任何人都能注册（这是为了全新部署时能建出第一个超管）。
+          填上第一条之后就开始严格限制。
+        </div>
+      </section>
+    </template>
+
     <!-- 配额编辑：自绘小弹窗，不用原生 prompt（原生弹窗会卡死自动化，也不好看） -->
     <transition name="pop">
       <div v-if="quotaBox" class="mask" @click.self="quotaBox = null">
@@ -107,6 +151,48 @@ const kw = ref('')
 const me = ref(null)
 const allowed = ref(true)
 
+/* ---- 注册白名单 ---- */
+const whitelist = ref([])
+const wlKind = ref('qq')
+const wlPattern = ref('')
+const wlNote = ref('')
+const wlBusy = ref(false)
+const wlErr = ref('')
+
+async function loadWhitelist() {
+  try { whitelist.value = await api.listWhitelist() } catch (e) { whitelist.value = [] }
+}
+
+async function addWhitelist() {
+  wlErr.value = ''
+  const p = wlPattern.value.trim()
+  if (!p) { wlErr.value = '先填要加的值'; return }
+  wlBusy.value = true
+  try {
+    await api.addWhitelist({ pattern: p, kind: wlKind.value, note: wlNote.value.trim() })
+    wlPattern.value = ''
+    wlNote.value = ''
+    await loadWhitelist()
+  } catch (e) {
+    // 后端已经把格式错误/重复翻译成人话了，直接显示
+    wlErr.value = e.message || '添加失败'
+  } finally {
+    wlBusy.value = false
+  }
+}
+
+async function removeWhitelist(w) {
+  wlBusy.value = true
+  try {
+    await api.delWhitelist(w.id)
+    await loadWhitelist()
+  } catch (e) {
+    wlErr.value = e.message || '移除失败'
+  } finally {
+    wlBusy.value = false
+  }
+}
+
 const myId = computed(() => me.value?.id)
 const myRole = computed(() => me.value?.role || 'GUEST')
 
@@ -133,9 +219,20 @@ function assignable() {
 
 async function load() {
   try {
-    me.value = await api.me()
-    users.value = await api.listUsers(kw.value)
+    // me.value 来自 /auth/me，它**没有 role 字段**（只有基本档案）。
+    // 而下面的 myRole 全靠 role 判「能不能指派别人」——
+    // 读 me.role 永远是 undefined → myRole 恒为 GUEST →
+    // 超管连「指派管理员」的下拉都看不到。这是静默失效，不报错。
+    // 所以角色单独问 /account/profile 拿。
+    const [meRes, prof, list] = await Promise.all([
+      api.me(),
+      api.accountProfile().catch(() => null),
+      api.listUsers(kw.value),
+    ])
+    me.value = { ...meRes, role: prof?.role || 'USER' }
+    users.value = list
     allowed.value = true
+    loadWhitelist()   // 不 await：白名单拉失败不该把整页拖成错误态
   } catch (e) {
     // 403 是「有账号但不是管理员」，不是网络错，别显示成错误
     if (e.code === 403 || e.code === 43000) allowed.value = false
@@ -218,6 +315,35 @@ onMounted(load)
 </script>
 
 <style scoped>
+
+/* ---------- 注册白名单 ---------- */
+.wl-sec {
+  margin-top: 26px; padding: 20px 22px;
+  border: 1px solid var(--line); border-radius: 14px; background: #fff;
+}
+.wl-title { font-size: 16px; font-weight: 600; color: var(--ink); margin: 0 0 6px; }
+.wl-sub { font-size: 13px; color: var(--ink-3); margin: 0 0 16px; line-height: 1.65; }
+.wl-add { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.wl-kind { width: 100px; flex: none; }
+.wl-pattern { width: 190px; flex: none; }
+.wl-note { flex: 1; min-width: 140px; }
+.wl-err { margin-top: 9px; font-size: 13px; color: var(--danger); }
+.wl-list { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
+.wl-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border-radius: 9px; background: rgba(138, 144, 166, .07); font-size: 13px;
+}
+.wl-badge {
+  flex: none; padding: 1px 7px; border-radius: 5px; font-size: 11px; font-weight: 600;
+  background: rgba(91, 108, 255, .1); color: #5b6cff;
+}
+.wl-badge.email { background: rgba(23, 178, 106, .1); color: #17b26a; }
+.wl-val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
+.wl-note { color: var(--ink-3); flex: 1; }
+.wl-empty {
+  margin-top: 12px; padding: 12px 14px; border-radius: 9px;
+  background: rgba(247, 144, 9, .07); font-size: 13px; color: var(--ink-2); line-height: 1.6;
+}
 .admin-page { padding: 30px var(--page-pad) 46px; }
 .ad-head { display: flex; align-items: flex-start; justify-content: space-between;
            gap: 20px; max-width: var(--content-max); }

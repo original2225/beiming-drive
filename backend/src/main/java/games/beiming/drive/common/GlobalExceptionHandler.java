@@ -45,6 +45,25 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail(ErrorCode.BAD_REQUEST.code(), "文件超过单次上传上限"));
     }
 
+    /**
+     * 唯一约束冲突。
+     *
+     * 之前这类错误会落到下面的兜底 handler，把
+     * 「duplicate key value violates unique constraint "drv_user_email_key"」
+     * 原样吐给客户端 —— 既难读，又把表名/约束名漏出去了。
+     * 最常见的来源是重复注册邮箱，这里翻译成人话。
+     */
+    @ExceptionHandler(org.springframework.dao.DuplicateKeyException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDuplicate(
+            org.springframework.dao.DuplicateKeyException e) {
+        String m = String.valueOf(e.getMessage());
+        String msg = m.contains("drv_user_email_key") ? "这个邮箱已经注册过了"
+                : m.contains("drv_register_whitelist") ? "这条白名单已经存在了"
+                : "数据已存在，请不要重复提交";
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(ErrorCode.CONFLICT.code(), msg));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleAny(Exception e) {
         log.error("unhandled error", e);
