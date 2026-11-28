@@ -136,6 +136,7 @@
                        @click="preview(it)">在线预览</div>
                   <div class="menu-item" @click="doRename(it)">重命名</div>
                   <div class="menu-item" @click="openMove(it)">移动到…</div>
+                  <div class="menu-item" @click="togglePublic(it)">{{ it.isPublic ? '取消公开' : '设为公开' }}</div>
                   <template v-if="isAdmin">
                     <div class="menu-sep"></div>
                     <div class="menu-item" @click="openAcl(it)">权限设置…</div>
@@ -185,6 +186,7 @@
           <div class="ctx-sep"></div>
           <div class="ctx-item" @click="ctxDo(doRename)">重命名</div>
           <div class="ctx-item" @click="ctxDo(openMove)">移动到…</div>
+          <div class="ctx-item" @click="ctxDo(togglePublic)">{{ ctxMenu.node.isPublic ? '取消公开' : '设为公开' }}</div>
           <div class="ctx-sep"></div>
           <div class="ctx-item danger" @click="ctxDo(remove)">移入回收站</div>
         </template>
@@ -1000,6 +1002,18 @@ async function doRename(it) {
       await refresh()
     },
   })
+}
+
+async function togglePublic(it) {
+  menuFor.value = null
+  ctxMenu.value = null
+  try {
+    await api.setVisibility(it.id, !it.isPublic)
+    await refresh()
+    showToast(it.isPublic ? '已取消公开' : '已设为公开，游客可见', 'ok')
+  } catch (e) {
+    showToast(e.message || '操作失败', 'error')
+  }
 }
 
 async function remove(it) {

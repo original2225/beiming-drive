@@ -71,7 +71,7 @@ public class FileService {
     public record Node(long id, long ownerId, Long parentId, String name, String path,
                        String kind, long size, String mime, String sha256,
                        String status, Instant createdAt, Instant updatedAt, Instant trashedAt,
-                       String originalPath) {
+                       String originalPath, boolean isPublic) {
 
         public boolean isDir() {
             return "dir".equals(kind);
@@ -89,7 +89,8 @@ public class FileService {
             rs.getTimestamp("created_at").toInstant(),
             rs.getTimestamp("updated_at").toInstant(),
             rs.getTimestamp("trashed_at") == null ? null : rs.getTimestamp("trashed_at").toInstant(),
-            rs.getString("original_path"));
+            rs.getString("original_path"),
+            rs.getBoolean("is_public"));
 
     private static String join(String parentPath, String name) {
         if ("/".equals(parentPath)) return "/" + name;
@@ -796,5 +797,50 @@ public class FileService {
             }
         }
         return new Stats(dirs, files, bytes);
+    }
+
+    // ============================================================
+    // 游客公开链路（is_public）
+    //
+    // 口径（V9 迁移注释定的，别改）：is_public **只对节点自己生效，不继承**。
+    //   母目录公开 ≠ 里面的子文件也公开。所以：
+    //   - 游客首页：列全站 is_public=true 的条目（任意层，平铺）；
+    //   - 点进某个公开目录（带 parentId）：**先要求这个目录自己 is_public**，
+    //     再列它下面同样 is_public 的子项。目录不公开就不给枚举（404），
+    //     否则「母目录公开、子文件不公开」就变成整棵子树裸奔。
+    // ============================================================
+
+    /** 游客列公开内容。parentId 为空 → 全站公开条目平铺；否则要求该目录自己公开，再列其公开子项。 */
+    public List<Node> listPublic(Long parentId) {
+        if (parentId == null) {
+            return jdbc.query(
+                    "select * from drv_node where is_public and status='READY' and is_root=false " +
+                    "order by kind desc, name asc", MAPPER);
+        }
+        Node parent = publicById(parentId);
+        if (!parent.isDir()) {
+            throw new DriveException(ErrorCode.BAD_REQUEST, "不是一个目录");
+        }
+        return jdbc.query(
+                "select * from drv_node where parent_id=? and is_public and status<>'TRASHED' " +
+                "order by kind desc, name asc", MAPPER, parentId);
+    }
+
+    /** 按 id 取**公开**节点；不公开或不在 READY 一律 404（不区分「不存在」和「不公开」，避免当枚举器）。 */
+    public Node publicById(long id) {
+        List<Node> rows = jdbc.query("select * from drv_node where id=? and status='READY'", MAPPER, id);
+        if (rows.isEmpty() || !rows.get(0).isPublic()) throw new DriveException(ErrorCode.NOT_FOUND);
+        return rows.get(0);
+    }
+
+    /** 设置/取消公开。只有节点归属者或管理员能改。 */
+    @Transactional
+    public Node setPublic(long userId, long id, boolean isPublic) {
+        Node n = byIdRaw(id);
+        if (n.ownerId() != userId && !isAdmin(userId)) {
+            throw new DriveException(ErrorCode.FORBIDDEN, "只有文件所有者或管理员能设置公开");
+        }
+        jdbc.update("update drv_node set is_public=?, updated_at=now() where id=?", isPublic, id);
+        return byIdRaw(id);
     }
 }

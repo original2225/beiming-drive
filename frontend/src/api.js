@@ -80,6 +80,9 @@ export const api = {
   rename: (id, name) => request(`/files/${id}/rename`, { method: 'PATCH', body: { name } }),
   move: (id, targetParentId) =>
     request(`/files/${id}/move`, { method: 'POST', body: { targetParentId } }),
+  /** 设置/取消公开（游客可见）。只有归属者或管理员能改 */
+  setVisibility: (id, isPublic) =>
+    request(`/files/${id}/visibility`, { method: 'PATCH', body: { isPublic } }),
   trash: (id) => request(`/files/${id}`, { method: 'DELETE' }),
   restore: (id) => request(`/files/${id}/restore`, { method: 'POST' }),
   purge: (id) => request(`/files/${id}/purge`, { method: 'DELETE' }),

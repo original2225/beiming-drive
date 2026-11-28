@@ -23,7 +23,10 @@ public class WebConfig implements WebMvcConfigurer {
                         "/api/v1/auth/register",
                         // 忘记密码的人当然没 token，三条必须放行
                         "/api/v1/auth/forgot/**",
-                        "/api/share/**"
+                        "/api/share/**",
+                        // 游客浏览/下载公开内容：只认 is_public，不走 ACL。
+                        // 必须精确到 /api/public/**，写成 /api/** 等于全站裸奔。
+                        "/api/public/**"
                 );
     }
 

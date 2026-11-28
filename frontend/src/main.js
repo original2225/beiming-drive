@@ -18,6 +18,7 @@ const router = createRouter({
   routes: [
     { path: '/login', component: Login, meta: { public: true } },
     { path: '/forgot', component: () => import('./pages/ForgotPassword.vue'), meta: { public: true } },
+    { path: '/public', component: () => import('./pages/PublicHome.vue'), meta: { public: true } },
     { path: '/', component: Home },
     { path: '/shares', component: Shares },
     { path: '/downloader', component: Downloader },
@@ -31,8 +32,12 @@ const router = createRouter({
 })
 
 router.beforeEach((to) => {
-  if (!to.meta.public && !getToken()) return '/login'
   if (to.path === '/login' && getToken()) return '/'
+  // 游客（无 token）访问首页 → 引导到公开内容页（不弹登录）。
+  // 其它非公开页面仍然要求登录。
+  if (!to.meta.public && !getToken()) {
+    return to.path === '/' ? '/public' : '/login'
+  }
   return true
 })
 

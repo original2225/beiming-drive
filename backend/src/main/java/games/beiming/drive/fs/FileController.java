@@ -134,6 +134,16 @@ public class FileController {
         return ApiResponse.ok(files.move(currentUser.require().userId(), id, req.targetParentId()));
     }
 
+    public record VisibilityReq(boolean isPublic) {
+    }
+
+    /** 设置/取消公开（游客可见）。只有节点归属者或管理员能改。 */
+    @PatchMapping("/{id}/visibility")
+    public ApiResponse<FileService.Node> visibility(@PathVariable long id,
+                                                    @RequestBody VisibilityReq req) {
+        return ApiResponse.ok(files.setPublic(currentUser.require().userId(), id, req.isPublic()));
+    }
+
     @DeleteMapping("/{id}")
     public ApiResponse<Void> trash(@PathVariable long id) {
         files.trash(currentUser.require().userId(), id);

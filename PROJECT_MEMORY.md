@@ -3,7 +3,42 @@
 > **交接用法**：开新会话第一句说「先读 README.md 和 PROJECT_MEMORY.md，只看最新一节，然后做 <具体下一步>，别动其他模块」。README 讲**怎么用/怎么部署**，本文件讲**做到哪、为什么这么做、接下来做什么**。
 > 每完成一块完整功能就往下追加一节（格式见文末）。上下文到 10 万 token 左右就换会话。
 
-## 一句话现状（更新于 2026-11-28 23:40）
+## 一句话现状（更新于 2026-11-29 03:05）
+
+自研网盘（不是 Cloudreve 换皮）主功能已闭环：登录、文件树、上传下载、sha256 分卷去重、在线预览、分享、回收站、专属多线程下载器、自研站内搜索、右侧竖栏 + 新建菜单、四角色权限模型 + 独立设置页 + 用户管理页、右栏下载记录与收藏夹、安全问题找回密码、共享目录树 + 四档节点权限（ACL）、注册白名单（只有北冥管理官方能注册）、**游客公开链路（is_public 浏览/下载，未登录不再弹登录）**。回收站 30 天自动清理 + 孤儿 blob 回收已完成并上线。全部提交已 push 到 origin。
+
+## 收工状态（2026-11-29 03:05，本轮「游客公开链路 is_public」收工）
+
+- 分支 `main`，迁移仍是 **V9**（`is_public` 列 V9 就有，本轮只是把 Java/前端接上，不加迁移）
+- 端到端：`verify_public` **19/19**，其余 118 项回归未动（本轮不碰权限/白名单/搜索）
+- 容器 `drive-app` 健康 UP
+- 本轮还修了：右侧竖栏收起态放大镜不居中（`SideRail.vue` input flex 未归零，偏左 9px）
+
+### 本轮做的（游客公开链路）
+
+- **`FileService.Node` 加 `isPublic` 字段 + `MAPPER` 映射 `is_public` 列**（record 加字段必须同步改 MAPPER，否则查询拿不到值、也不报错）。
+- **`/api/public/nodes`（列）、`/{id}`（元信息）、`/{id}/dl`（下载，支持 Range）** —— `PublicNodeController`，匿名可访问。**只认 `is_public`，不走 ACL、不发 token。**
+- **`WebConfig` 排除 `"/api/public/**"`** —— 必须精确到这个前缀，写成 `/api/**` 等于全站裸奔。
+- **`PATCH /api/v1/files/{id}/visibility`** —— owner 或管理员改公开开关（`FileService.setPublic`，非 owner/管理员 403）。
+- **前端**：右键菜单/行内菜单加「设为公开/取消公开」；新增游客落地页 `/public`（`PublicHome.vue`），未登录访问 `/` 走守卫跳到 `/public`。
+- **`SpaWebController` 白名单加 `/public`**（新页面必改三处：main.js routes / SpaWebController / 本页无外壳走 meta.public 自动分流）。
+
+### 本轮最关键的口径（改之前先看，别当 bug 改回去）
+
+- **`is_public` 只对节点自己生效，不继承**（V9 注释定的）。母目录公开 ≠ 子文件公开：
+  - 游客首页 = 全站 `is_public=true` 条目**平铺**（任意层）；
+  - 点进某公开目录（带 `parentId`）= **先要求该目录自己 `is_public`**，再列其下 `is_public` 子项；目录不公开 → 404。
+  - 所以「母目录公开、子里某个文件没标公开」时，游客进目录看到的是**空壳**——这是设计不是 bug。`verify_public` 第 5 节专门锁这条，改回去会让「公开」变整棵子树裸奔。
+- `/api/public/{id}` 不公开一律 404（不区分「不存在」和「不公开」），避免被当目录枚举器。
+
+### 本轮踩的坑
+
+1. **测试脚本崩在中途会留残留账号 + 公开节点**，游客页就露测试垃圾。已把 `verify_public` 清理包进 `finally` + 按 `pubtest%/pubui%/railcheck%` 前缀兜底，崩了也自清。
+2. **用错账号验证 403 会误判成 bug**：文件属于 A（uid 165），我登了 B（uid 164）去改，回 403「只有文件所有者或管理员能改」——这是**正确权限行为**，不是 bug。验证 owner 操作前先确认文件 owner_id。
+3. **浏览器验证 Vue 菜单：`el.click()` 和 `dispatchEvent(new MouseEvent('click'))` 都可能不生效，且跨调用菜单会被点外部关掉**。可靠做法：**同一次 js 调用内**先开菜单 → 取 `.getBoundingClientRect()` 坐标 → `cdp Input.dispatchMouseEvent mousePressed/mouseReleased` 真实点击。本轮靠这条才验到前端 handler 真的把库改成 `f`。
+4. **`frontend/src/api.js` 的 token 键是 `drive_token` 不是 `token`**，注入登录态时写错键 → 一直掉回登录页。
+
+## 一句话现状（历史，2026-11-28 23:40）
 
 自研网盘（不是 Cloudreve 换皮）主功能已闭环：登录、文件树、上传下载、sha256 分卷去重、在线预览、分享、回收站、专属多线程下载器、自研站内搜索、右侧竖栏 + 新建菜单、四角色权限模型 + 独立设置页 + 用户管理页、右栏下载记录与收藏夹、安全问题找回密码、共享目录树 + 四档节点权限（ACL）、**注册白名单（只有北冥管理官方能注册）**。回收站 30 天自动清理 + 孤儿 blob 回收已完成并上线。全部提交已 push 到 origin。
 
@@ -258,19 +293,19 @@
 - 推送时绕过了一次分支保护（见上「收工状态」）
 - 后端测试只有 1 个测试类，覆盖很薄——真要改核心逻辑得自己补
 
-## 待办 / 下一步（README「还没做」同步过来的）
+## 待办 / 下一步（README「还没做」同步过来的，2026-11-29 更新）
 
-1. 回收站自动清理（30 天）
-2. 多用户协作、共享目录
-3. 离线部署：`docker compose` 目前只跑了 postgres，后端还是本机 java 进程
-4. 并入 `beiming-official-website` 的模块化单体（等这个跑稳再决定）
-5. ~~把未推提交 push 上去~~（已完成，`af87a93`）
+1. 分享转存（把别人分享的文件存到我网盘，按 sha256 建引用、**独立计引用数**，否则转存方删了/原 owner 也删了会误判孤儿）
+2. 备份脚本（pgdata / blobs / remote / searchidx 四个卷零备份，库里已两个真实账号）
+3. 并入 `beiming-official-website` 的模块化单体（等这个跑稳再决定）
+
+已完成（原在待办里）：~~回收站自动清理~~、~~多用户协作/共享目录~~（V8）、~~离线部署~~（compose.prod.yml 全容器）、~~push 未推提交~~。
 
 ## 已知的坑（踩过的，别再踩）
 
 - **新增前端页面必须同步改 `SpaWebController` 白名单**，否则直接访问该路径 404 并弹回首页（知识库有整卡：`排障SOP_beiming-drive_新增前端页面漏改_SpaWebController_白名单`）
 - **`.page` 的 `padding` + `max-width` 必须每页标配**，漏一页就是文字贴边满屏（知识库卡：`beiming-drive_内页布局_.page_的_padding_max-width_必须每页标配`）
-- **重新打包前必须停掉占用 8140 的 java 进程**，否则 `mvn package` 报 `Unable to rename ...jar to ...jar.original`
+- **改后端不要 kill 占用 8140 的进程** —— 那是 Docker 的端口转发（`com.docker.backend.exe` / `wslrelay.exe`），kill 了服务入口就没了。改后端走 `docker compose -f compose.prod.yml up -d --build app`。（旧文档写的「停 java 进程再 mvn package」是更早本机跑 jar 时代的事，现在不适用）
 - **git-bash 里 curl 发中文会变 GBK**；用 Python 发请求或 `--data-binary @file`
 - **`.bat` 不能写 UTF-8 中文注释**（cmd 按 GBK 解析会把后半行当命令跑）
 - **Vite 代理只挂 `/api`**：写 `/s` 之类前缀会把整个前端转发给后端，页面白屏且控制台无报错
