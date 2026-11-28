@@ -22,19 +22,31 @@ import java.util.Map;
 
 /**
  * 文件系统服务：目录树、文件条目、回收站。
- * path 是全路径唯一键；改名/移动要级联更新子树的 path 前缀。
+ *
+ * <h3>2026-11-28 起的模型变化</h3>
+ * 以前是「每人一棵私有树」，所有查询都带 {@code owner_id=?}，别人看不见我的文件。
+ * 现在是**共享目录树**：只有一棵树，所有人共用。
+ * {@code owner_id} 于是从「隔离依据」降级成「谁上传的/谁建的」，只用于展示归属，
+ * 不再用于隔离 —— 隔离改由 {@link NodePermissionService} 按 ACL 判定。
+ *
+ * 所以本类里方法参数 {@code ownerId} 一律改叫 {@code userId}：
+ * 它现在的意思是「**当前操作的人**」，不是「所有者」。
+ * 保留位置和顺序的话调用方一处都不用改，但语义必须摆正，
+ * 否则下一个人读代码会以为这里还在做归属校验。
  */
 @Service
 public class FileService {
 
     private final JdbcTemplate jdbc;
     private final BlobStore blobs;
+    private final NodePermissionService perms;
     /** 搜索索引同步。用 setter 注入，因为 FsSearchSync 依赖 FileService.Node 的构造，直接构造注入会成环。 */
     private FsSearchSync searchSync;
 
-    public FileService(JdbcTemplate jdbc, BlobStore blobs) {
+    public FileService(JdbcTemplate jdbc, BlobStore blobs, NodePermissionService perms) {
         this.jdbc = jdbc;
         this.blobs = blobs;
+        this.perms = perms;
     }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -84,47 +96,107 @@ public class FileService {
         return parentPath + "/" + name;
     }
 
-    public Node rootOf(long ownerId) {
+    /**
+     * 「根目录」现在对所有人都是同一个 —— 全站唯一那棵树的根。
+     *
+     * 参数 userId 只用来判权限，不再用来选根：以前是「找我的根」，
+     * 现在是「大家的根是同一个，你给我看有没有浏览权」。
+     */
+    public Node rootOf(long userId) {
         List<Node> rows = jdbc.query(
-                "select * from drv_node where owner_id=? and parent_id is null", MAPPER, ownerId);
+                "select * from drv_node where is_root limit 1", MAPPER);
         if (rows.isEmpty()) throw new DriveException(ErrorCode.NOT_FOUND, "根目录缺失");
-        return rows.get(0);
+        Node root = rows.get(0);
+        perms.require(userId, root.id(), NodePermissionService.Right.BROWSE, isAdmin(userId));
+        return root;
     }
 
-    public Node byId(long ownerId, long id) {
+    /**
+     * 按 id 取节点，顺带做浏览权校验。
+     *
+     * 这里把「是不是你的」换成了「你有没有权看」：
+     * 以前 owner_id 对不上就 404，现在没授权也是 404 —— 仍然不告诉对方
+     * 「这个文件存在但你无权看」，因为那本身就是信息泄露。
+     */
+    public Node byId(long userId, long id) {
         List<Node> rows = jdbc.query(
-                "select * from drv_node where owner_id=? and id=?", MAPPER, ownerId, id);
+                "select * from drv_node where id=?", MAPPER, id);
+        if (rows.isEmpty()) throw new DriveException(ErrorCode.NOT_FOUND);
+        Node n = rows.get(0);
+        if (!perms.can(userId, id, NodePermissionService.Right.BROWSE, isAdmin(userId))) {
+            throw new DriveException(ErrorCode.NOT_FOUND);
+        }
+        return n;
+    }
+
+    /** 取节点但**不校验浏览权**。给内部逻辑用（改权限、算配额、回收站），别在接口层直接用 */
+    public Node byIdRaw(long id) {
+        List<Node> rows = jdbc.query("select * from drv_node where id=?", MAPPER, id);
         if (rows.isEmpty()) throw new DriveException(ErrorCode.NOT_FOUND);
         return rows.get(0);
     }
 
-    public Node byPath(long ownerId, String path) {
+    /**
+     * 按路径取。新模型里 path 是全站唯一的绝对路径，所以不带 owner_id 条件 ——
+     * 带了反而会漏（别人传的文件 owner_id 不是我，但我有权限就该能取到）。
+     */
+    public Node byPath(long userId, String path) {
         List<Node> rows = jdbc.query(
-                "select * from drv_node where owner_id=? and path=?", MAPPER, ownerId, path);
+                "select * from drv_node where path=? and status <> 'TRASHED'", MAPPER, path);
         if (rows.isEmpty()) throw new DriveException(ErrorCode.NOT_FOUND);
-        return rows.get(0);
+        Node n = rows.get(0);
+        if (!perms.can(userId, n.id(), NodePermissionService.Right.BROWSE, isAdmin(userId))) {
+            throw new DriveException(ErrorCode.NOT_FOUND);
+        }
+        return n;
+    }
+
+    /** 当前用户是不是管理员（走 ACL 旁路）。每次查一次库，量很小 */
+    private boolean isAdmin(long userId) {
+        try {
+            String role = jdbc.queryForObject(
+                    "select role from drv_user where id=?", String.class, userId);
+            return games.beiming.drive.auth.Role.of(role).isAdmin();
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** 列目录：parentId 为 null 表示根。不看回收站。根节点自身不列。 */
-    public List<Node> list(long ownerId, Long parentId) {
-        return list(ownerId, parentId, "name", "asc");
+    public List<Node> list(long userId, Long parentId) {
+        return list(userId, parentId, "name", "asc");
     }
 
     /**
      * 带排序的列目录。orderBy 只接受白名单，防止 SQL 注入。
      * 文件夹永远排前面，这是网盘的基本预期。
+     *
+     * 新的地方：不再按 owner_id 过滤（共享树里大家都是同一棵树），
+     * 改成「列出这一层里我有浏览权的那些」。
      */
-    public List<Node> list(long ownerId, Long parentId, String orderBy, String direction) {
-        Long pid = (parentId == null) ? rootOf(ownerId).id() : parentId;
+    public List<Node> list(long userId, Long parentId, String orderBy, String direction) {
+        Long pid = (parentId == null) ? rootOf(userId).id() : parentId;
+        // 没权看这个目录就直接拒，别返回空列表 —— 空列表会让人以为「这里本来就没东西」
+        perms.require(userId, pid, NodePermissionService.Right.BROWSE, isAdmin(userId));
+
         String col = switch (orderBy == null ? "name" : orderBy) {
             case "size" -> "size";
             case "updatedAt" -> "updated_at";
             default -> "name";
         };
         String dir = "desc".equalsIgnoreCase(direction) ? "desc" : "asc";
-        return jdbc.query("select * from drv_node where owner_id=? and parent_id=? " +
-                "and status <> 'TRASHED' order by kind desc, " + col + " " + dir,
-                MAPPER, ownerId, pid);
+        List<Node> all = jdbc.query(
+                "select * from drv_node where parent_id=? and status <> 'TRASHED' " +
+                "order by kind desc, " + col + " " + dir, MAPPER, pid);
+        if (all.isEmpty()) return all;
+
+        // 逐个看权限。目录一屏几十项，批量筛一次查完再过滤。
+        boolean admin = isAdmin(userId);
+        if (admin) return all;
+        Map<Long, NodePermissionService.Perm> ok =
+                perms.effectiveBatch(userId, all.stream().map(Node::id).toList(), false);
+        return all.stream().filter(n -> ok.getOrDefault(n.id(), NodePermissionService.Perm.NONE).browse())
+                  .toList();
     }
 
     /**
@@ -167,14 +239,16 @@ public class FileService {
      *
      * @param excludeId 要把自己排除在「占用」之外时传自己的 id；新建传 null
      */
-    private String freePath(long ownerId, Node parent, String name, Long excludeId) {
+    private String freePath(long userId, Node parent, String name, Long excludeId) {
         String candidate = name;
         int seq = 1;
         while (true) {
             String path = join(parent.path(), candidate);
+            // 共享树里 path 全局唯一，所以判重**不带 owner_id** ——
+            // 别人已经在同一位置放了同名文件，我也得让路（以前各人一棵树才不用管）。
             Integer dup = jdbc.queryForObject(
-                    "select count(*) from drv_node where owner_id=? and path=? and (?::bigint is null or id<>?)",
-                    Integer.class, ownerId, path, excludeId, excludeId);
+                    "select count(*) from drv_node where path=? and (?::bigint is null or id<>?)",
+                    Integer.class, path, excludeId, excludeId);
             if (dup == null || dup == 0) return path;
             int dot = name.lastIndexOf('.');
             // 带扩展名时把序号插在扩展名前面（报告 (1).pdf 而不是 报告.pdf (1)）
@@ -188,13 +262,21 @@ public class FileService {
     }
 
     @Transactional
-    public Node mkdir(long ownerId, Long parentId, String name) {
-        Node parent = parentId == null ? rootOf(ownerId) : byId(ownerId, parentId);
+    public Node mkdir(long userId, Long parentId, String name) {
+        Node parent = parentId == null ? rootOf(userId) : byId(userId, parentId);
         if (!parent.isDir()) throw new DriveException(ErrorCode.BAD_REQUEST, "父节点不是目录");
+
+        // 花蝉 2026-11-28 定的规则：**文件夹只能管理员建**。
+        // 普通用户只能往管理员建好的目录里传文件。
+        if (!isAdmin(userId)) {
+            throw new DriveException(ErrorCode.FORBIDDEN, "只有管理员能新建文件夹");
+        }
+
         String path = join(parent.path(), name);
+        // 判重不带 owner_id：共享树里 path 全局唯一
         Integer dup = jdbc.queryForObject(
-                "select count(*) from drv_node where owner_id=? and path=?",
-                Integer.class, ownerId, path);
+                "select count(*) from drv_node where path=? and status <> 'TRASHED'",
+                Integer.class, path);
         if (dup != null && dup > 0) throw new DriveException(ErrorCode.CONFLICT);
 
         KeyHolder kh = new GeneratedKeyHolder();
@@ -202,13 +284,20 @@ public class FileService {
             PreparedStatement ps = con.prepareStatement(
                     "insert into drv_node(owner_id,parent_id,name,path,kind) values (?,?,?,?,'dir')",
                     new String[]{"id"});
-            ps.setLong(1, ownerId);
+            ps.setLong(1, userId);
             ps.setLong(2, parent.id());
             ps.setString(3, name);
             ps.setString(4, path);
             return ps;
         }, kh);
-        Node created = byId(ownerId, java.util.Objects.requireNonNull(kh.getKey()).longValue());
+        Node created = byId(userId, java.util.Objects.requireNonNull(kh.getKey()).longValue());
+        // 建者本人全权：不给这条的话，建者会继承上级规则，可能连自己刚建的都动不了。
+        //
+        // **但不要给「其他人」写死规则**：管理员建「公共资料」这种目录本意就是给大家用的，
+        // 硬写 everyone=NONE 会让它变成只有管理员能进（实测踩过：普通用户直接 404）。
+        // 其他人不写规则 = 自然继承上级 —— 上级是公共区就公共，是个人目录就关门。
+        // 要收紧某个目录，由管理员在权限面板里显式设，不由 mkdir 替他决定。
+        perms.grant(created.id(), userId, NodePermissionService.Perm.ALL, userId);
         indexPut(created);
         return created;
     }
@@ -220,11 +309,16 @@ public class FileService {
         Node parent = parentId == null ? rootOf(ownerId) : byId(ownerId, parentId);
         if (!parent.isDir()) throw new DriveException(ErrorCode.BAD_REQUEST, "父节点不是目录");
 
+        // 共享树里「在别人的目录里传东西」是常态，必须校验上传权。
+        // 花蝉定的规则：文件夹只有管理员能建，但普通用户可以在
+        // 管理员开了上传权的目录里传文件。
+        perms.require(ownerId, parent.id(), NodePermissionService.Right.UPLOAD, isAdmin(ownerId));
+
         String path = join(parent.path(), name);
 
         List<Node> existing = jdbc.query(
-                "select * from drv_node where owner_id=? and path=? and status<>'TRASHED'",
-                MAPPER, ownerId, path);
+            "select * from drv_node where path=? and status<>'TRASHED'",
+            MAPPER, path);
         if (!existing.isEmpty()) {
             Node old = existing.get(0);
             if (old.isDir()) throw new DriveException(ErrorCode.CONFLICT, "同名目录已存在");
@@ -295,8 +389,8 @@ public class FileService {
 
         // 先子树后自己，理由同 rename：避免前缀互相覆盖
         List<Node> sub = jdbc.query(
-                "select * from drv_node where owner_id=? and path like ? order by length(path) desc",
-                MAPPER, ownerId, n.path() + "/%");
+                "select * from drv_node where path like ? order by length(path) desc",
+                MAPPER, n.path() + "/%");
         // 子树必须跟着标 TRASHED —— 只搬 path 不搬 status 的话，
         // 里面的文件还留着 READY，既是「在回收站里」又是「活文件」，两边都算不清。
         List<Object[]> batch = new ArrayList<>();
@@ -326,9 +420,9 @@ public class FileService {
 
     private long subtreeBytes(long ownerId, long id) {
         Long v = jdbc.queryForObject(
-                "select coalesce(sum(size),0) from drv_node where owner_id=? " +
-                        "and kind='file' and (id=? or path like (select path from drv_node where id=?) || '/%')",
-                Long.class, ownerId, id, id);
+                "select coalesce(sum(size),0) from drv_node " +
+                        "where kind='file' and (id=? or path like (select path from drv_node where id=?) || '/%')",
+                Long.class, id, id);
         return v == null ? 0L : v;
     }
 
@@ -360,17 +454,17 @@ public class FileService {
         // 照着 original_path 搬回可见空间。子树的原路径是它自己的 original_path，
         // 不需要按前缀推算 —— trash() 时逐个记下来了，这样父目录中途被改名也不会错位。
         List<Node> subtree = jdbc.query(
-                "select * from drv_node where owner_id=? and (id=? or path like ?) "
+                "select * from drv_node where (id=? or path like ?) "
                         + "order by length(path) desc",
-                MAPPER, ownerId, id, n.path() + "/%");
+                MAPPER, id, n.path() + "/%");
 
         // 原位置可能已经被新的同名条目占了（删了之后又建了一个）—— 这时根节点换个名字，
         // 子树按「根节点的新名字」重新拼。只有这一层需要避让，用户看得懂。
         String targetPath = originalPathOf(subtree, id, n);
         String targetName = targetPath.substring(targetPath.lastIndexOf('/') + 1);
         Integer taken = jdbc.queryForObject(
-                "select count(*) from drv_node where owner_id=? and path=? and id<>?",
-                Integer.class, ownerId, targetPath, id);
+                "select count(*) from drv_node where path=? and id<>?",
+                Integer.class, targetPath, id);
         if (taken != null && taken > 0) {
             Node parent = byId(ownerId, n.parentId());
             String free = freePath(ownerId, parent, targetName, id);
@@ -397,13 +491,13 @@ public class FileService {
         jdbc.update("update drv_node set name=?, status='READY', trashed_at=null, "
                 + "original_path=null where id=?", targetName, id);
         jdbc.update("update drv_node set status='READY', trashed_at=null, original_path=null "
-                + "where owner_id=? and path like ? and id<>?", ownerId, targetPath + "/%", id);
+                + "where path like ? and id<>?", targetPath + "/%", id);
 
         adjustQuota(ownerId, subtreeBytes(ownerId, id));
         // 恢复后重新进索引
         for (Node d : jdbc.query(
-                "select * from drv_node where owner_id=? and (id=? or path like ?)",
-                MAPPER, ownerId, id, targetPath + "/%")) {
+                "select * from drv_node where (id=? or path like ?)",
+                MAPPER, id, targetPath + "/%")) {
             indexPut(d);
         }
         return byId(ownerId, id);
@@ -431,19 +525,19 @@ public class FileService {
         Node n = byId(ownerId, id);
         // 先把要被删的文件 sha 收齐（含子树），删完就查不到了
         List<String> shas = jdbc.queryForList(
-                "select sha256 from drv_node where owner_id=? and kind='file' and sha256 is not null " +
+                "select sha256 from drv_node where kind='file' and sha256 is not null " +
                         "and (id=? or path like ?)",
-                String.class, ownerId, id, n.path() + "/%");
+                String.class, id, n.path() + "/%");
 
         // 先摘索引再删数据：索引里留着已不存在的条目，搜到了点进去会 404
         indexRemove(id);
         for (Node d : jdbc.query(
-                "select * from drv_node where owner_id=? and path like ?",
-                MAPPER, ownerId, n.path() + "/%")) {
+                "select * from drv_node where path like ?",
+                MAPPER, n.path() + "/%")) {
             indexRemove(d.id());
         }
-        jdbc.update("delete from drv_node where owner_id=? and (id=? or path like ?)",
-                ownerId, id, n.path() + "/%");
+        jdbc.update("delete from drv_node where (id=? or path like ?)",
+                id, n.path() + "/%");
         return shas;
     }
 
@@ -490,14 +584,14 @@ public class FileService {
         String newPath = join(parent.path(), newName);
 
         Integer dup = jdbc.queryForObject(
-                "select count(*) from drv_node where owner_id=? and path=? and id<>? and status<>'TRASHED'",
-                Integer.class, ownerId, newPath, id);
+                "select count(*) from drv_node where path=? and id<>? and status<>'TRASHED'",
+                Integer.class, newPath, id);
         if (dup != null && dup > 0) throw new DriveException(ErrorCode.CONFLICT);
 
         // 先改子树里深层节点的 path，再改自己，避免前缀互相覆盖
         List<Node> descendants = jdbc.query(
-                "select * from drv_node where owner_id=? and path like ? order by length(path) desc",
-                MAPPER, ownerId, n.path() + "/%");
+                "select * from drv_node where path like ? order by length(path) desc",
+                MAPPER, n.path() + "/%");
         List<Object[]> batch = new ArrayList<>();
         for (Node d : descendants) {
             batch.add(new Object[]{newPath + d.path().substring(n.path().length()), d.id()});
@@ -509,8 +603,8 @@ public class FileService {
         // 改名会连带子树 path 全部变化，整棵子树重灌索引（path 也在可检索字段里）
         indexPut(renamed);
         for (Node d : jdbc.query(
-                "select * from drv_node where owner_id=? and path like ? and status<>'TRASHED'",
-                MAPPER, ownerId, newPath + "/%")) {
+                "select * from drv_node where path like ? and status<>'TRASHED'",
+                MAPPER, newPath + "/%")) {
             indexPut(d);
         }
         return renamed;
@@ -538,15 +632,15 @@ public class FileService {
 
         String newPath = join(target.path(), n.name());
         Integer dup = jdbc.queryForObject(
-                "select count(*) from drv_node where owner_id=? and path=? and id<>? and status<>'TRASHED'",
-                Integer.class, ownerId, newPath, id);
+                "select count(*) from drv_node where path=? and id<>? and status<>'TRASHED'",
+                Integer.class, newPath, id);
         if (dup != null && dup > 0) {
             throw new DriveException(ErrorCode.CONFLICT, "目标目录已有同名条目");
         }
 
         List<Node> descendants = jdbc.query(
-                "select * from drv_node where owner_id=? and path like ? order by length(path) desc",
-                MAPPER, ownerId, n.path() + "/%");
+                "select * from drv_node where path like ? order by length(path) desc",
+                MAPPER, n.path() + "/%");
         List<Object[]> batch = new ArrayList<>();
         for (Node d : descendants) {
             batch.add(new Object[]{newPath + d.path().substring(n.path().length()), d.id()});
@@ -557,8 +651,8 @@ public class FileService {
         Node moved = byId(ownerId, id);
         indexPut(moved);
         for (Node d : jdbc.query(
-                "select * from drv_node where owner_id=? and path like ? and status<>'TRASHED'",
-                MAPPER, ownerId, newPath + "/%")) {
+                "select * from drv_node where path like ? and status<>'TRASHED'",
+                MAPPER, newPath + "/%")) {
             indexPut(d);
         }
         return moved;

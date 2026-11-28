@@ -164,6 +164,25 @@ export const api = {
     request('/auth/forgot/verify', { method: 'POST', body: { email, answers } }),
   forgotReset: (ticket, password) =>
     request('/auth/forgot/reset', { method: 'POST', body: { ticket, password } }),
+
+  // --- 节点权限（管理员） ---
+  // 看某节点上显式写了哪些规则（不含继承来的）
+  nodeAcl: (nodeId) => request(`/admin/nodes/${nodeId}/acl`),
+  // 设「所有人」的默认权限。传 null 表示删掉这条规则
+  setNodeAclEveryone: (nodeId, perm) =>
+    request(`/admin/nodes/${nodeId}/acl`, {
+      method: 'PUT',
+      body: perm ? { everyone: perm } : { everyone: null, userId: null },
+    }),
+  // 给某个人单独设权限（就近覆盖「所有人」）
+  setNodeAclUser: (nodeId, userId, perm) =>
+    request(`/admin/nodes/${nodeId}/acl`, {
+      method: 'PUT', body: { userId, perm },
+    }),
+  delNodeAclUser: (nodeId, userId) =>
+    request(`/admin/nodes/${nodeId}/acl/${userId}`, { method: 'DELETE' }),
+  // 问「我对这个节点有什么权限」，前端据此决定按钮显不显示
+  myPerm: (nodeId) => request(`/admin/nodes/${nodeId}/my-perm`),
 };
 
 export function downloadUrl(id) {

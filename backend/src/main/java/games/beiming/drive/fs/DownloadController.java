@@ -30,23 +30,31 @@ public class DownloadController {
     private final BlobStore blobs;
     private final CurrentUser currentUser;
     private final UserFileMarksService marks;
+    private final NodePermissionService perms;
 
     public DownloadController(FileService files, BlobStore blobs,
-                              CurrentUser currentUser, UserFileMarksService marks) {
+                              CurrentUser currentUser, UserFileMarksService marks,
+                              NodePermissionService perms) {
         this.files = files;
         this.blobs = blobs;
         this.currentUser = currentUser;
         this.marks = marks;
+        this.perms = perms;
     }
 
     @GetMapping("/{id}/download")
     public void download(@PathVariable long id,
                          HttpServletRequest req,
                          HttpServletResponse res) throws IOException {
-        FileService.Node node = files.byId(currentUser.require().userId(), id);
+        CurrentUser.Auth who = currentUser.require();
+        FileService.Node node = files.byId(who.userId(), id);
         if (node.isDir() || node.sha256() == null) {
             throw new DriveException(ErrorCode.BAD_REQUEST, "该条目不是可下载文件");
         }
+        // 共享树里「能看」不等于「能给原件」—— 浏览权只能列目录，
+        // 下载要单独有 can_download。花蝉要的「预览/访问/下载」分开就是这么落地的。
+        perms.require(who.userId(), id, NodePermissionService.Right.DOWNLOAD,
+                NodePermissionService.bypass(who.role()));
 
         long size = blobs.sizeOf(node.sha256());
         String range = req.getHeader("Range");
@@ -132,10 +140,15 @@ public class DownloadController {
     public void preview(@PathVariable long id,
                         HttpServletRequest req,
                         HttpServletResponse res) throws IOException {
-        FileService.Node node = files.byId(currentUser.require().userId(), id);
+        CurrentUser.Auth who = currentUser.require();
+        FileService.Node node = files.byId(who.userId(), id);
         if (node.isDir() || node.sha256() == null) {
             throw new DriveException(ErrorCode.BAD_REQUEST, "该条目不是可预览文件");
         }
+        // 预览和下载分开授权：can_preview 只给人看内容，不给原始文件。
+        // 这是「能看不能下」唯一能落地的位置。
+        perms.require(who.userId(), id, NodePermissionService.Right.PREVIEW,
+                NodePermissionService.bypass(who.role()));
         String mime = node.mime() == null ? "application/octet-stream" : node.mime();
         // 只允许浏览器内联渲染的类型，其他一律退回下载，避免把用户上传的 html 当页面执行
         if (!isInlineSafe(mime, node.name())) {

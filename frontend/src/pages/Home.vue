@@ -136,6 +136,10 @@
                        @click="preview(it)">在线预览</div>
                   <div class="menu-item" @click="doRename(it)">重命名</div>
                   <div class="menu-item" @click="openMove(it)">移动到…</div>
+                  <template v-if="isAdmin">
+                    <div class="menu-sep"></div>
+                    <div class="menu-item" @click="openAcl(it)">权限设置…</div>
+                  </template>
                   <div class="menu-sep"></div>
                   <div class="menu-item danger" @click="remove(it)">移入回收站</div>
                 </div>
@@ -288,6 +292,88 @@
       </div>
     </div>
 
+    <!-- 权限设置面板（仅管理员） -->
+    <div v-if="aclNode" class="mask" @click.self="aclNode = null">
+      <div class="modal">
+        <h3>「{{ aclNode.name }}」的权限</h3>
+        <p class="muted acl-tip">
+          这里的设置只管这一层；子目录不单独设，就跟着这里走。
+        </p>
+
+        <div class="acl-sec">
+          <div class="acl-sec-title">所有人</div>
+          <div class="acl-grid">
+            <label class="acl-chk">
+              <input type="checkbox" v-model="aclEveryone.browse" /> 浏览
+            </label>
+            <label class="acl-chk">
+              <input type="checkbox" v-model="aclEveryone.preview" /> 预览
+            </label>
+            <label class="acl-chk">
+              <input type="checkbox" v-model="aclEveryone.download" /> 下载
+            </label>
+            <label class="acl-chk">
+              <input type="checkbox" v-model="aclEveryone.upload" /> 上传
+            </label>
+          </div>
+          <div class="acl-act">
+            <button class="btn btn-sm btn-primary" :disabled="aclBusy" @click="saveAclEveryone">
+              保存
+            </button>
+          </div>
+        </div>
+
+        <div class="acl-sec">
+          <div class="acl-sec-title">单独指定某人</div>
+          <div class="acl-row">
+            <select class="input" v-model="aclForm.userId">
+              <option value="">选择用户…</option>
+              <option v-for="u in aclUsers" :key="u.id" :value="u.id">
+                {{ u.nickname || u.email }}
+              </option>
+            </select>
+          </div>
+          <div class="acl-grid">
+            <label class="acl-chk">
+              <input type="checkbox" v-model="aclForm.browse" /> 浏览
+            </label>
+            <label class="acl-chk">
+              <input type="checkbox" v-model="aclForm.preview" /> 预览
+            </label>
+            <label class="acl-chk">
+              <input type="checkbox" v-model="aclForm.download" /> 下载
+            </label>
+            <label class="acl-chk">
+              <input type="checkbox" v-model="aclForm.upload" /> 上传
+            </label>
+          </div>
+          <div class="acl-act">
+            <button class="btn btn-sm btn-primary" :disabled="aclBusy" @click="saveAclUser">
+              保存
+            </button>
+          </div>
+        </div>
+
+        <div v-if="aclRows.length" class="acl-sec">
+          <div class="acl-sec-title">已经有了的规则</div>
+          <div v-for="r in aclRows" :key="r.id" class="acl-existing">
+            <span class="acl-who">{{ r.userId === null ? '所有人' : (r.nickname || ('用户 ' + r.userId)) }}</span>
+            <span class="acl-flags">
+              <span :class="{ on: r.browse }">浏览</span>
+              <span :class="{ on: r.preview }">预览</span>
+              <span :class="{ on: r.download }">下载</span>
+              <span :class="{ on: r.upload }">上传</span>
+            </span>
+            <button class="btn btn-sm icon-only" title="收回" @click="revokeAclUser(r)">✕</button>
+          </div>
+        </div>
+
+        <div class="modal-foot">
+          <button class="btn" @click="aclNode = null">关闭</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 预览弹窗 -->
     <div v-if="previewBox" class="mask darker" @click.self="previewBox = null">
       <div class="preview-modal">
@@ -320,6 +406,17 @@ const router = useRouter()
 const CHUNK = 8 * 1024 * 1024
 
 const me = ref(null)
+// 当前用户角色。只有 SUPER_ADMIN/ADMIN 能看权限入口（模板里的 isAdmin）。
+const role = ref('USER')
+const isAdmin = computed(() => role.value === 'SUPER_ADMIN' || role.value === 'ADMIN')
+
+// 权限面板：aclNode 是被操作的那个节点，aclRows 是它上面已有的显式规则
+const aclNode = ref(null)
+const aclRows = ref([])
+const aclBusy = ref(false)
+const aclUsers = ref([])
+const aclForm = ref({ userId: '', browse: false, preview: false, download: false, upload: false })
+const aclEveryone = ref({ browse: true, preview: true, download: false, upload: false })
 const items = ref([])
 const loading = ref(false)
 const view = ref('files')
@@ -550,6 +647,12 @@ async function loadMe() {
   try {
     me.value = await api.me()
     syncAvatarFromMe()
+    // 角色不在 /me 里（UserView 只有基本档案），单独问一次账户信息。
+    // 失败不致命：isAdmin 保持 false，权限入口就不显示，正好是安全方向。
+    try {
+      const prof = await api.accountProfile()
+      role.value = (prof && prof.role) || 'USER'
+    } catch (e) { role.value = 'USER' }
   } catch (e) { /* 401 交给路由守卫 */ }
 }
 
@@ -920,6 +1023,80 @@ async function openMove(it) {
   // 从根开始选目标，避免一进来就困在当前目录里
   moveBox.value = { node: it, trail: [], dirs: [], targetId: null }
   await loadDirs(null)
+}
+
+/* ---------- 权限设置面板（仅管理员） ---------- */
+
+async function openAcl(it) {
+  menuFor.value = null
+  aclNode.value = it
+  aclRows.value = []
+  aclBusy.value = true
+  try {
+    // 已有规则 + 可授权的人，两件事一起拉
+    const [rows, users] = await Promise.all([
+      api.nodeAcl(it.id),
+      api.listUsers('').catch(() => []),
+    ])
+    aclRows.value = rows || []
+    aclUsers.value = (users || []).filter(u => u.role !== 'GUEST')
+    // 表单预填：把「所有人」那条读出来，没有就用保守默认
+    const everyone = (rows || []).find(r => r.userId === null)
+    aclEveryone.value = everyone
+      ? { browse: everyone.browse, preview: everyone.preview,
+          download: everyone.download, upload: everyone.upload }
+      : { browse: true, preview: true, download: false, upload: false }
+    aclForm.value = { userId: '', browse: false, preview: false, download: false, upload: false }
+  } catch (e) {
+    showToast(e.message || '读权限失败', 'err')
+  } finally {
+    aclBusy.value = false
+  }
+}
+
+async function saveAclEveryone() {
+  if (!aclNode.value) return
+  aclBusy.value = true
+  try {
+    await api.setNodeAclEveryone(aclNode.value.id, aclEveryone.value)
+    showToast('已更新「所有人」权限', 'ok')
+    await openAcl(aclNode.value)
+  } catch (e) {
+    showToast(e.message || '保存失败', 'err')
+  } finally {
+    aclBusy.value = false
+  }
+}
+
+async function saveAclUser() {
+  const uid = Number(aclForm.value.userId)
+  if (!aclNode.value || !uid) { showToast('先选一个人', 'err'); return }
+  aclBusy.value = true
+  try {
+    const { userId, ...perm } = aclForm.value
+    await api.setNodeAclUser(aclNode.value.id, uid, perm)
+    showToast('已保存该用户权限', 'ok')
+    await openAcl(aclNode.value)
+  } catch (e) {
+    showToast(e.message || '保存失败', 'err')
+  } finally {
+    aclBusy.value = false
+  }
+}
+
+async function revokeAclUser(row) {
+  if (!aclNode.value) return
+  aclBusy.value = true
+  try {
+    if (row.userId === null) await api.setNodeAclEveryone(aclNode.value.id, null)
+    else await api.delNodeAclUser(aclNode.value.id, row.userId)
+    showToast('已收回', 'ok')
+    await openAcl(aclNode.value)
+  } catch (e) {
+    showToast(e.message || '收回失败', 'err')
+  } finally {
+    aclBusy.value = false
+  }
 }
 
 async function loadDirs(parentId) {
@@ -1458,6 +1635,34 @@ onUnmounted(() => {
 /* ---------- 移动对话框 ---------- */
 .mask.darker { background: rgba(10, 14, 24, .72); }
 .move-tip { font-size: 14px; margin: -6px 0 10px; }
+
+/* ---------- 权限设置面板 ---------- */
+.acl-tip { font-size: 13px; margin: -6px 0 14px; line-height: 1.6; }
+.acl-sec { border-top: 1px solid var(--line); padding: 14px 0 4px; }
+.acl-sec:first-of-type { border-top: none; padding-top: 0; }
+.acl-sec-title { font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 10px; }
+.acl-grid { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 12px; }
+.acl-chk {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--ink-2); cursor: pointer; user-select: none;
+}
+.acl-chk input { accent-color: var(--brand); cursor: pointer; }
+.acl-row { margin-bottom: 10px; }
+.acl-row .input { width: 100%; }
+.acl-act { display: flex; justify-content: flex-end; padding-bottom: 6px; }
+.acl-existing {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 8px; background: var(--bg);
+  margin-bottom: 6px; font-size: 13px;
+}
+.acl-who { min-width: 88px; font-weight: 500; color: var(--ink); }
+.acl-flags { display: flex; gap: 6px; flex: 1; flex-wrap: wrap; }
+.acl-flags span {
+  padding: 1px 7px; border-radius: 5px; font-size: 12px;
+  color: var(--ink-3); background: var(--card); border: 1px solid var(--line);
+}
+/* 已授予的那一项要看得出来，否则「浏览 预览 下载 上传」四块灰字分不清开了哪几个 */
+.acl-flags span.on { color: var(--brand); border-color: var(--brand); background: var(--brand-soft); }
 .dir-picker { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .dp-crumb {
   display: flex; align-items: center; flex-wrap: wrap; gap: 2px;

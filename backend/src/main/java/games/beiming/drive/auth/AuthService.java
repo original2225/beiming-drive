@@ -78,9 +78,12 @@ public class AuthService {
         }, kh);
 
         long id = java.util.Objects.requireNonNull(kh.getKey()).longValue();
-        // 每个用户一个根目录
-        jdbc.update("insert into drv_node(owner_id, parent_id, name, path, kind) " +
-                "values (?, null, '', '/', 'dir')", id);
+        // 共享目录树之后，**注册不再建根** —— 全站只有一个根，V8 迁移里建好了。
+        // 以前每人一棵树，所以注册时插一个 (owner_id, '/', dir)；
+        // 新模型 path 全局唯一，第二个人注册就会撞唯一约束报 500（实测踩过）。
+        //
+        // 新用户没有自己的目录，直接在根下按权限浏览/上传即可。
+        // 需要个人目录时由管理员建、再单独授权。
         return login(email, password);
     }
 
