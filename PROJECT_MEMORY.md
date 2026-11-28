@@ -3,17 +3,36 @@
 > **交接用法**：开新会话第一句说「先读 README.md 和 PROJECT_MEMORY.md，只看最新一节，然后做 <具体下一步>，别动其他模块」。README 讲**怎么用/怎么部署**，本文件讲**做到哪、为什么这么做、接下来做什么**。
 > 每完成一块完整功能就往下追加一节（格式见文末）。上下文到 10 万 token 左右就换会话。
 
-## 一句话现状（更新于 2026-11-28 22:55）
+## 一句话现状（更新于 2026-11-28 23:40）
 
-自研网盘（不是 Cloudreve 换皮）主功能已闭环：登录、文件树、上传下载、sha256 分卷去重、在线预览、分享、回收站、专属多线程下载器、自研站内搜索、右侧竖栏 + 新建菜单、四角色权限模型 + 独立设置页 + 用户管理页、右栏下载记录与收藏夹、安全问题找回密码、**共享目录树 + 四档节点权限（ACL）**。回收站 30 天自动清理 + 孤儿 blob 回收已完成并上线。全部提交已 push 到 origin。
+自研网盘（不是 Cloudreve 换皮）主功能已闭环：登录、文件树、上传下载、sha256 分卷去重、在线预览、分享、回收站、专属多线程下载器、自研站内搜索、右侧竖栏 + 新建菜单、四角色权限模型 + 独立设置页 + 用户管理页、右栏下载记录与收藏夹、安全问题找回密码、共享目录树 + 四档节点权限（ACL）、**注册白名单（只有北冥管理官方能注册）**。回收站 30 天自动清理 + 孤儿 blob 回收已完成并上线。全部提交已 push 到 origin。
 
-## 收工状态（2026-11-28 22:55，本轮「共享目录树 + ACL 权限」收工）
+## 收工状态（2026-11-28 23:40，本轮「注册白名单 + 搜索按权限过滤」收工）
 
-- 分支 `main`，**HEAD `c207f7e`，已推送 origin/main**
-- 迁移已应用到 **V8**（共享单根 + `/昵称` + `drv_node_acl` + path 全局唯一）
+- 分支 `main`，**HEAD `2b780a7`，已推送 origin/main**
+- 迁移已应用到 **V9**（V9 = `drv_register_whitelist` + `drv_node.is_public`）
 - 线上库两个真实账号（`admin@beiming.local` 超管、`1578086557@qq.com` 用户），60 个节点
-- 端到端：`cache/verify_acl.py` **10/10**、`verify_marks.py` **24/24**、`verify_roles.py` **35/35**、`verify_reset.py` **27/27**
-- 容器 `drive-app` 健康 UP
+- 白名单 2 条（V9 迁移自动回填存量账号 —— 不回填他们将来找回密码会被自己挡住）
+- 端到端：`verify_whitelist` **22/22**、`verify_acl` **10/10**、`verify_marks` **24/24**、`verify_roles` **35/35**、`verify_reset` **27/27**，共 **118/118**
+- 容器 `drive-app` 健康 UP，搜索索引 59 条
+
+### 本轮新增的坑（都会再犯）
+
+1. **`FsSearchSync.search(ownerScope, keyword, limit)` 参数顺序是 scope 在前**。我改共享树时写成 `search(keyword, null, limit)`，等于 scope=关键词、keyword=null → **搜什么都返回空且不报错**，看着像「搜索功能没做」，实际是传参反了。改搜索必查签名顺序。
+2. **改过索引结构/清过数据后，搜索索引卷可能残留旧结构**。症状：库 58 条、索引 55 条，搜啥都是 0。修法：停容器 → `docker run --rm -v beiming-drive_searchidx:/s alpine sh -c 'rm -rf /s/*'` → 起容器，日志应出现 `重建完成，共 N 条` + `启动对齐：0 → N 条`。
+3. **`byId` 把「无权看」也报 404**，所以**不能**用 `try { byId() } catch { 认为不存在 }` 来判断节点是否还在 —— 搜索里这么写会把别人没权限的文件从索引里删掉（删数据，不是过滤结果）。要先用 `byIdRaw()` 确认还在，再单独问 `perms.can()`。
+4. **`/auth/me` 返回的 `UserView` 没有 `role`**。AdminUsers 的 `myRole` 读 `me.role` 恒为 `GUEST` → 超管连「指派管理员」下拉都不显示（静默失效）。要从 `/account/profile` 取。Home.vue 的 `isAdmin` 同样处理。
+5. **`DuplicateKeyException` 落兜底 handler 会把 `drv_user_email_key` 这种约束名吐给客户端**。已加专门 handler 翻译成「这个邮箱已经注册过了」。
+6. **白名单上线后，所有造测试账号的脚本都会 403**。`verify_roles/marks/reset/acl` 都加了 `allow_signup(email)`（psql 直插白名单）。**以后写任何验收脚本，注册前先 allow_signup。**
+
+### 注册与权限的最终口径（改之前先看这段）
+
+- **网盘不开放注册**：`drv_register_whitelist` 里的人才行，否则 403。
+- **白名单空表时放行** —— 全新部署时还没人填，空表全拒会让机器永远建不出第一个超管。
+- 匹配：`kind=qq` 认 `<qq>@qq.com` / `@vip.qq.com` / `@foxmail.com`；`kind=email` 认完整邮箱；都小写归一，**不做前缀匹配**。
+- 游客（不登录）只有使用权：能下载**公开**文件/分享，不能上传、不能收藏。公开性用 `drv_node.is_public` 显式标记，**不靠「没设 ACL」推断**。
+- 管理员/超管在用户管理页自己维护白名单，加人不用改代码。
+- 搜索：**全站检索**（scope 传 null），结果按 `perms.can(BROWSE)` 过滤 —— 搜得到不等于看得到。
 
 ### 本轮新增的坑（都会再犯）
 
