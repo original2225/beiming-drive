@@ -312,10 +312,10 @@ python scripts/verify/verify_trash.py
 
 ## 还没做
 
-- 分享转存（把别人分享的文件保存到我的网盘，按 sha256 建引用、独立计引用数）
 - 备份脚本（pgdata / blobs / remote / searchidx 四个卷目前零备份）
 - 并入 `beiming-official-website` 的模块化单体（等这个跑稳再决定）
 
+~~分享转存~~ —— 已完成：分享页「保存到我的网盘」，零拷贝（复用 sha256 blob）+ 自动改名避让。
 ~~多用户协作、共享目录~~ —— 已完成，见 V8 共享树 + ACL。
 ~~离线部署~~ —— 已完成，`compose.prod.yml` 全容器化（app + postgres）。
 ~~回收站自动清理（30 天）~~ —— 已完成，见下面「回收站与磁盘回收」。

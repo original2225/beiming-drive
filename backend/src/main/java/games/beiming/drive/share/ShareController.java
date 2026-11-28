@@ -17,11 +17,14 @@ import java.util.Map;
 public class ShareController {
 
     private final ShareService shares;
+    private final SaveService saveSvc;
     private final FileService files;
     private final CurrentUser currentUser;
 
-    public ShareController(ShareService shares, FileService files, CurrentUser currentUser) {
+    public ShareController(ShareService shares, SaveService saveSvc, FileService files,
+                           CurrentUser currentUser) {
         this.shares = shares;
+        this.saveSvc = saveSvc;
         this.files = files;
         this.currentUser = currentUser;
     }
@@ -44,6 +47,18 @@ public class ShareController {
     @GetMapping
     public ApiResponse<List<ShareService.Share>> mine() {
         return ApiResponse.ok(shares.listMine(currentUser.require().userId()));
+    }
+
+    public record SaveReq(@Size(max = 64) String password, Long targetParentId) {
+    }
+
+    /** 把分享的文件/目录转存到我网盘。零拷贝：只新建节点引用同一 sha，不复制字节。 */
+    @PostMapping("/{id}/save")
+    public ApiResponse<SaveService.SaveResult> save(@PathVariable String id,
+                                                    @RequestBody(required = false) SaveReq req) {
+        SaveReq r = req == null ? new SaveReq(null, null) : req;
+        return ApiResponse.ok(saveSvc.save(currentUser.require().userId(), id,
+                r.password(), r.targetParentId()));
     }
 
     @DeleteMapping("/{id}")

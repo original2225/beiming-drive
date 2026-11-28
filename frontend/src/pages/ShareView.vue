@@ -26,10 +26,14 @@
               {{ node.kind === 'dir' ? `${items.length} 个文件` : sizeText(node.size) }}
             </div>
           </div>
+          <button v-if="loggedIn" class="btn btn-ghost" :disabled="saving" @click="save">
+            {{ saving ? '保存中…' : '保存到我的网盘' }}
+          </button>
           <button v-if="node.kind === 'file'" class="btn btn-primary" @click="download">
             下载文件
           </button>
         </div>
+        <div v-if="saveMsg" class="save-msg" :class="saveMsg.kind">{{ saveMsg.text }}</div>
 
         <div v-if="node.kind === 'dir'" class="items">
           <div v-for="i in items" :key="i.id" class="item">
@@ -49,6 +53,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { api, getToken } from '../api.js'
 
 const route = useRoute()
 const loading = ref(true)
@@ -57,6 +62,10 @@ const password = ref('')
 const node = ref(null)
 const items = ref([])
 const err = ref('')
+
+const saving = ref(false)
+const saveMsg = ref(null)   // { kind: 'ok'|'err', text }
+const loggedIn = computed(() => !!getToken())
 
 const shareId = computed(() => route.params.id)
 
@@ -96,6 +105,23 @@ function download() {
   window.open(`/api/share/${shareId.value}/dl${q}`, '_blank')
 }
 
+async function save() {
+  saveMsg.value = null
+  saving.value = true
+  try {
+    // targetParentId 传 null → 落到根目录。用户可在网盘里再挪。
+    const r = await api.saveShare(shareId.value, password.value || null, null)
+    const n = r.files != null && r.dirs != null ? `（${r.files} 个文件${r.dirs ? `、${r.dirs} 个目录` : ''}）` : ''
+    saveMsg.value = { kind: 'ok', text: `已保存到你的网盘${n}，可在「我的文件」里查看。` }
+  } catch (e) {
+    const msg = e.message || '保存失败'
+    // 普通用户转存文件夹会 403（文件夹只有管理员能建，这是既有规则）
+    saveMsg.value = { kind: 'err', text: msg.includes('管理员') ? `${msg}（文件夹只有管理员能建，你可以让分享者重新分享文件，或下载后自己上传）` : msg }
+  } finally {
+    saving.value = false
+  }
+}
+
 onMounted(fetchShare)
 </script>
 
@@ -129,4 +155,11 @@ onMounted(fetchShare)
 .pw-row { display: flex; gap: 9px; max-width: 320px; margin: 0 auto; }
 .err { background: #fff5f4; color: var(--danger); border: 1px solid #ffd5d2;
        padding: 9px 12px; border-radius: 9px; font-size: 12.5px; margin-top: 14px; }
+.btn-ghost { background: transparent; border: 1px solid var(--line); color: var(--ink-2);
+             border-radius: 9px; padding: 8px 14px; font-size: 13px; cursor: pointer; }
+.btn-ghost:hover:not(:disabled) { border-color: #cfd6ea; color: var(--ink); background: #f7f8fc; }
+.btn-ghost:disabled { opacity: .6; cursor: default; }
+.save-msg { margin-top: 12px; padding: 9px 12px; border-radius: 9px; font-size: 12.5px; }
+.save-msg.ok { background: #f2f7f0; color: #3d7a3a; border: 1px solid #cfe6cb; }
+.save-msg.err { background: #fff5f4; color: var(--danger); border: 1px solid #ffd5d2; }
 </style>

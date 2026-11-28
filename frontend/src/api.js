@@ -118,6 +118,8 @@ export const api = {
     request('/shares', { method: 'POST', body: { nodeId, password, expireHours, maxDownloads } }),
   myShares: () => request('/shares'),
   revokeShare: (id) => request(`/shares/${id}`, { method: 'DELETE' }),
+  saveShare: (id, password, targetParentId) =>
+    request(`/shares/${id}/save`, { method: 'POST', body: { password, targetParentId } }),
 
   // --- 远程下载 ---
   createRemote: (url, filename, targetParentId, workers) =>
