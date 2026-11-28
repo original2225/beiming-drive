@@ -21,6 +21,8 @@ public class WebConfig implements WebMvcConfigurer {
                 .excludePathPatterns(
                         "/api/v1/auth/login",
                         "/api/v1/auth/register",
+                        // 忘记密码的人当然没 token，三条必须放行
+                        "/api/v1/auth/forgot/**",
                         "/api/share/**"
                 );
     }

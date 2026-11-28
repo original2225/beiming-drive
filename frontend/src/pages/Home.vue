@@ -94,6 +94,7 @@
           <div class="th th-ops">操作</div>
         </div>
         <div v-for="it in items" :key="it.id" class="row" @click="onItemClick(it)"
+             :data-node-id="it.id"
              :class="{ 'ctx-target': ctxMenu && ctxMenu.node && ctxMenu.node.id === it.id }"
              @contextmenu.prevent.stop="openCtx(it, $event)">
           <div class="row-icon">{{ it.kind === 'dir' ? '📁' : fileIcon(it.name) }}</div>
@@ -121,6 +122,13 @@
               <button v-if="it.kind === 'file' && canPreview(it)" class="btn btn-sm" @click="preview(it)">预览</button>
               <button v-if="it.kind === 'file'" class="btn btn-sm" @click="download(it)">下载</button>
               <button class="btn btn-sm" @click="share(it)">分享</button>
+              <!-- 收藏（星标）。实心=已收藏。放在操作区而不是只藏在右键菜单里，
+                   因为「标一下」是很轻的动作，藏进二级菜单没人会用。 -->
+              <button class="btn btn-sm icon-only star-btn" :class="{ on: isStarred(it.id) }"
+                      :title="isStarred(it.id) ? '取消收藏' : '收藏'"
+                      @click.stop="toggleStar(it)">
+                <svg viewBox="0 0 24 24"><path d="M12 4l2.5 5.2 5.7.8-4.1 4 1 5.7-5.1-2.7-5.1 2.7 1-5.7-4.1-4 5.7-.8z" /></svg>
+              </button>
               <div class="more-wrap">
                 <button class="btn btn-sm icon-only" @click.stop="toggleMenu(it)">⋯</button>
                 <div v-if="menuFor === it.id" class="menu" @click.stop>
@@ -324,6 +332,46 @@ const uploads = ref([])
 // 右侧竖栏是否展开（默认收起：顶部头像、底部放大镜）
 const railOpen = ref(false)
 
+/* ---------- 收藏（星标）----------
+ * 用 Set 而不是数组：每行的星标要判「在不在里面」，文件一屏几十行，
+ * includes 线性找会有几十次小搜索，Set 是 O(1)。
+ * 数据来源是后端批量问一次（/me/stars/in），不是每行发一个请求。 */
+const starredIds = ref(new Set())
+
+function isStarred(id) { return starredIds.value.has(id) }
+
+async function loadStarred() {
+  const ids = items.value.map(x => x.id)
+  if (!ids.length) { starredIds.value = new Set(); return }
+  try {
+    const hit = await api.starredIn(ids)
+    starredIds.value = new Set(hit)
+  } catch (e) {
+    starredIds.value = new Set()
+  }
+}
+
+async function toggleStar(it) {
+  const has = starredIds.value.has(it.id)
+  // 先改本地再发请求：点星标要立刻有反馈，等接口回来再变色太钝。
+  // 请求失败再回滚。
+  const next = new Set(starredIds.value)
+  if (has) next.delete(it.id); else next.add(it.id)
+  starredIds.value = next
+  try {
+    if (has) await api.unstar(it.id)
+    else await api.star(it.id)
+    // 侧栏的「收藏夹」是另一个组件实例，它自己不会知道这里改了。
+    // 用事件通知它重拉 —— 否则用户收藏完展开右栏，看不到刚标的那条。
+    window.dispatchEvent(new CustomEvent('drive:stars-changed'))
+  } catch (e) {
+    // 回滚到点之前的样子
+    const back = new Set(starredIds.value)
+    if (has) back.add(it.id); else back.delete(it.id)
+    starredIds.value = back
+  }
+}
+
 /// 内容层的身份标识：变了才播过渡。
 /// 「我的文件」内部切目录也算一次内容变化（列表整块换掉），
 /// 所以把 currentId 拼进来；回收站单独一个 key。
@@ -513,6 +561,7 @@ async function refresh() {
     const d = await api.list(currentId.value, orderBy.value, dir.value)
     items.value = d.items || []
     await loadMe()
+    await loadStarred()
   } catch (e) {
     console.warn(e)
   } finally {
@@ -626,6 +675,7 @@ async function doSearch() {
   try {
     const d = await api.search(q)
     items.value = d.items || []
+    await loadStarred()
   } catch (e) {
     items.value = []
   } finally {
@@ -1042,18 +1092,74 @@ function runSearch(q) {
 
 function onGlobalSearch(e) { runSearch(e.detail) }
 
+/**
+ * 跳到指定目录（parent=null 即根）。
+ *
+ * 这里不用 open(node)：那个函数要一个 node 对象，而竖栏只给了 id。
+ * 走「设 currentId + 重取列表」这条最小路径，面包屑保持不动 ——
+ * 因为从竖栏跳过来时用户没有「上一级」的上下文，硬造 trail 反而会
+ * 拼出错误的面包屑（路径里某一级已经改名/移动过就对不上了）。
+ */
+async function jumpToParent(parentId) {
+  const id = parentId == null || parentId === '' || parentId === 'null'
+    ? null
+    : Number(parentId)
+  currentId.value = Number.isFinite(id) && id !== null ? id : null
+  trail.value = []
+  await refresh()
+}
+
+/* ---------- 竖栏里点「下载记录 / 收藏夹」的某一行 ----------
+ * 和搜索同源：竖栏在壳上，够不到这里的列表，所以由它派事件进来。
+ * 如果点的时候人在别的页，竖栏会先路由到 /?dir=...，这里挂载时
+ * 由下面的 onMounted 读 query 并把 nodeId 接着处理。
+ * 这里只做「高亮 + 滚到它」，不打开文件 —— 用户点的意图是「找到它」。 */
+/**
+ * 高亮并滚到某一行。
+ *
+ * 不能只等一次 nextTick：从竖栏跳过来时 refresh() 还在飞，行还没渲染，
+ * nextTick 那一刻 DOM 里没有目标节点，查不到就永远不闪了。
+ * 所以用「最多试 12 次、每次隔 100ms」的短轮询，行一出现就停。
+ */
+function focusNode(nodeId, tries = 0) {
+  if (!nodeId) return
+  const el = document.querySelector(`.row[data-node-id="${nodeId}"]`)
+  if (el) {
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    el.classList.add('flash')
+    setTimeout(() => el.classList.remove('flash'), 1400)
+    return
+  }
+  if (tries < 12) setTimeout(() => focusNode(nodeId, tries + 1), 100)
+}
+
+function onFocusNode(e) { focusNode(e.detail?.nodeId) }
+
 onMounted(() => {
   window.addEventListener('drive:search', onGlobalSearch)
+  window.addEventListener('drive:focus-node', onFocusNode)
 
   // 带 ?view=trash 进来（比如在「我的分享」页点了回收站）就直接进回收站。
   // 注意要用 openTrash 而不是 refresh，两者取的数据源不同。
   const wantTrash = router.currentRoute.value.query.view === 'trash'
   const wantQ = router.currentRoute.value.query.q
+  const wantParent = router.currentRoute.value.query.parent
+  const wantDir = router.currentRoute.value.query.dir
+  const wantNode = router.currentRoute.value.query.node
 
   if (wantTrash) {
     openTrash()
   } else if (wantQ) {
     runSearch(wantQ)          // 从其他页面的竖栏搜过来
+  } else if (wantDir || wantNode) {
+    // 点竖栏里的记录跳过来：先确认自己在文件视图，再进到目标目录并高亮。
+    // 用 parent=null 表示根目录，所以这里不能靠「wantParent 存在」判断 ——
+    // 根目录的 parent 是空，query 里就没有 parent 这个键。
+    view.value = 'files'
+    keyword.value = ''
+    jumpToParent(wantParent).then(() => {
+      if (wantNode) focusNode(Number(wantNode))
+    })
   } else {
     refresh()
   }
@@ -1288,6 +1394,28 @@ onUnmounted(() => {
 }
 .row:hover .row-ops { opacity: 1; }
 .icon-only { padding: 0; width: 30px; justify-content: center; }
+
+/* ===== 收藏星标 =====
+   空星 = 未收藏，实心 + 琥珀 = 已收藏。
+   星形路径本身是闭合的，所以未收藏时 fill:none 就只剩描边，
+   收藏后 fill 上色即可 —— 不需要换两个图标。 */
+.star-btn svg {
+  width: 14px; height: 14px; fill: none; stroke: currentColor;
+  stroke-width: 1.7; stroke-linejoin: round;
+  transition: fill .16s ease, stroke .16s ease, transform .12s ease;
+}
+.star-btn:hover svg { transform: scale(1.12); }
+.star-btn.on { color: #e8a33d; }
+.star-btn.on svg { fill: #f5b942; stroke: #e8a33d; }
+
+/* 从竖栏点记录跳过来时，目标行闪一下，否则满屏同色行看不出是哪一个 */
+.row.flash {
+  animation: rowFlash 1.4s ease;
+}
+@keyframes rowFlash {
+  0%, 100% { background: transparent; }
+  15%, 55% { background: #eef2ff; }
+}
 
 .more-wrap { position: relative; }
 .menu {

@@ -35,6 +35,10 @@
           <span v-if="busy" class="spinner"></span>
           <span>{{ busy ? '处理中…' : (mode === 'login' ? '登录' : '创建账号') }}</span>
         </button>
+
+        <div v-if="mode === 'login'" class="forgot-row">
+          <router-link to="/forgot" class="forgot-link">忘记密码？</router-link>
+        </div>
       </form>
     </div>
   </div>
@@ -107,38 +111,54 @@ async function submit() {
 .login-card { width: 100%; max-width: 400px; padding: 34px 32px 30px;
               position: relative; transform-origin: center center; }
 
-/* 离场：缩小为主，淡出为辅。
-   两个关键设计：
-   1. 前 28% 只缩不变淡 —— 缩放和透明度同时衰减时眼睛只看到「变淡」，缩小被掩盖。
-   2. 曲线不能太激进。用 cubic-bezier(.12,.9,...) 这种，前段一口气冲到底、
-      后段没有余量，会中间卡住不动几百毫秒（实测 scale 停在 .655 不动），
-      看着像「缩一下就僵住了」。这里用平缓的 ease-out，全程都在动。 */
+/* 离场：不是「原地缩小淡出」，而是像一张卡片翻到背后。
+   三个关键设计：
+   1. 前 20% 几乎不动 —— 先「抬起来」（轻微上移 + 微放大），
+      有这一步才像「被拎起来翻」，直接缩下去就是「憋下去」。
+   2. 用 rotateX 做真正的翻转，而不是只缩小。旋转带着透视，
+      眼睛读到的动作是「翻过去」，不是「变小了」。必须先有抬升再转，
+      否则一转就撞到底下那块白。
+   3. transform-origin 设在底部，所以是绕下沿往外翻 —— 像名片翻面。
+   曲线用 ease-in-out 的慢起慢收：翻页的物理直觉是先慢（抵抗重力）
+   再快（过了临界点）再慢（落定），匀速看着假。 */
 .login-card.leaving {
-  animation: card-collapse .8s cubic-bezier(.25, .5, .45, .95) forwards;
+  animation: card-flip-away .82s cubic-bezier(.45, .05, .35, .95) forwards;
+  transform-origin: center bottom;
   pointer-events: none;
+  backface-visibility: hidden;
 }
-@keyframes card-collapse {
-  0%   { transform: scale(1)    translateY(0);     opacity: 1;   filter: blur(0); }
-  28%  { transform: scale(.845) translateY(-4px);  opacity: 1;   filter: blur(0); }
-  50%  { transform: scale(.745) translateY(-8px);  opacity: .9;  filter: blur(1.2px); }
-  72%  { transform: scale(.655) translateY(-12px); opacity: .6;  filter: blur(3.2px); }
-  88%  { transform: scale(.59)  translateY(-15px); opacity: .25; filter: blur(5.4px); }
-  100% { transform: scale(.53)  translateY(-17px); opacity: 0;   filter: blur(7px); }
+@keyframes card-flip-away {
+  0%   { transform: perspective(1200px) translateY(0)      scale(1)    rotateX(0deg);    opacity: 1; }
+  18%  { transform: perspective(1200px) translateY(-10px)  scale(1.03) rotateX(0deg);    opacity: 1; }
+  45%  { transform: perspective(1200px) translateY(-14px)  scale(1)    rotateX(24deg);   opacity: .95; }
+  72%  { transform: perspective(1200px) translateY(-10px)  scale(.92)  rotateX(58deg);   opacity: .55; }
+  88%  { transform: perspective(1200px) translateY(-6px)   scale(.86)  rotateX(78deg);   opacity: .2; }
+  100% { transform: perspective(1200px) translateY(0)      scale(.8)   rotateX(86deg);   opacity: 0; }
 }
-/* 卡片里的内容稍微早于卡片消失（到 62% 就已淡尽），
-   这样看到的是「内容先散、框还留着缩小」，不是整张图一起缩 */
-.login-card.leaving > * { animation: fade-collapse .5s cubic-bezier(.4, 0, .6, 1) forwards; }
+
+/* 卡片内容比卡片本体早一点退场：翻到一半时字还清清楚楚地挂着，
+   会有「贴纸翻面」的违和感。这里让内容先薄下去，留下空框继续翻。 */
+.login-card.leaving > * {
+  animation: fade-collapse .58s cubic-bezier(.4, 0, .2, 1) forwards;
+}
 @keyframes fade-collapse {
   0%   { opacity: 1; transform: translateY(0); }
-  100% { opacity: 0; transform: translateY(-5px); }
+  100% { opacity: 0; transform: translateY(-8px); }
 }
 
 @keyframes card-fade-only { to { opacity: 0; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .login-card.leaving { animation: card-fade-only .22s ease-in forwards; }
+  .login-card.leaving { animation: card-fade-only .28s ease-in forwards; }
   .login-card.leaving > * { animation: none; }
 }
+.forgot-row { margin-top: 13px; text-align: center; }
+.forgot-link {
+  font-size: 12.5px; color: var(--ink-3); text-decoration: none;
+  transition: color .16s;
+}
+.forgot-link:hover { color: var(--brand-deep); }
+
 .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 26px; }
 .logo { width: 52px; height: 52px; border-radius: 50%; }
 .brand h1 { margin: 0; font-size: 21px; letter-spacing: .5px; }

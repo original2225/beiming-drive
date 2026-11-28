@@ -77,7 +77,7 @@ public class SpaWebController {
      *  因为 404 触发了前端 catch-all 的 redirect。
      *
      *  加页面时同步检查三处：main.js 的 routes、这里、以及 AppShell 的 contentKeyOf。 */
-    @GetMapping({"/", "/index.html", "/login", "/shares", "/downloader",
+    @GetMapping({"/", "/index.html", "/login", "/forgot", "/shares", "/downloader",
             "/storage", "/profile", "/settings", "/admin/users", "/s/*"})
     public void index(HttpServletResponse res) throws IOException {
         send(res, dist == null ? null : dist.resolve("index.html"));

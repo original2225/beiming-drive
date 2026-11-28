@@ -53,6 +53,52 @@
               <div class="rail-quota-num">{{ usedText }} / {{ quotaText }}</div>
             </div>
 
+            <!-- ===== 下载记录 =====
+                 默认折叠成一行标题，点开才拉列表。理由：抽屉本体已经很窄，
+                 两个列表都默认展开会把菜单挤出去，反而不好用。 -->
+            <section class="rail-sec" :class="{ folded: !dlOpen }">
+              <button class="rail-sec-head" @click="toggleDl">
+                <svg viewBox="0 0 24 24" class="sec-ic"><path d="M12 4v10m0 0l-4-4m4 4l4-4M5 19h14" /></svg>
+                <span class="sec-title">下载记录</span>
+                <span v-if="downloads.length" class="sec-badge">{{ downloads.length }}</span>
+                <svg viewBox="0 0 24 24" class="sec-caret"><path d="M6 9l6 6 6-6" /></svg>
+              </button>
+              <div class="sec-list">
+                <div v-for="d in downloads" :key="d.id" class="sec-row">
+                  <button class="row-main" :title="d.path || d.filename"
+                          @click="openFile(d.nodeId, d.parentId)">
+                    <span class="row-name">{{ d.filename }}</span>
+                    <span class="row-meta">
+                      {{ fmtSize(d.size) }} · {{ fmtWhen(d.lastAt) }}<template v-if="d.times > 1"> · {{ d.times }} 次</template>
+                    </span>
+                  </button>
+                  <button class="row-del" title="从记录里移除" @click.stop="removeDl(d)">×</button>
+                </div>
+                <div v-if="!downloads.length" class="sec-empty">还没有下载过文件</div>
+                <button v-if="downloads.length" class="sec-more" @click="clearDl">清空记录</button>
+              </div>
+            </section>
+
+            <!-- ===== 收藏夹 ===== -->
+            <section class="rail-sec" :class="{ folded: !starOpen }">
+              <button class="rail-sec-head" @click="toggleStar">
+                <svg viewBox="0 0 24 24" class="sec-ic star-ic"><path d="M12 4l2.5 5.2 5.7.8-4.1 4 1 5.7-5.1-2.7-5.1 2.7 1-5.7-4.1-4 5.7-.8z" /></svg>
+                <span class="sec-title">收藏夹</span>
+                <span v-if="stars.length" class="sec-badge">{{ stars.length }}</span>
+                <svg viewBox="0 0 24 24" class="sec-caret"><path d="M6 9l6 6 6-6" /></svg>
+              </button>
+              <div class="sec-list">
+                <div v-for="s in stars" :key="s.nodeId" class="sec-row">
+                  <button class="row-main" :title="s.path" @click="openFile(s.nodeId, s.path)">
+                    <span class="row-name">{{ s.filename }}</span>
+                    <span class="row-meta">{{ s.isDir ? '文件夹' : fmtSize(s.size) }}</span>
+                  </button>
+                  <button class="row-del" title="取消收藏" @click.stop="unstar(s)">×</button>
+                </div>
+                <div v-if="!stars.length" class="sec-empty">还没有收藏文件</div>
+              </div>
+            </section>
+
             <nav class="rail-nav">
               <button class="rail-item" @click="railMenuAction('profile')">
                 <svg viewBox="0 0 24 24"><circle cx="12" cy="8.2" r="3.6" /><path d="M4.8 20c.9-3.6 3.8-5.6 7.2-5.6s6.3 2 7.2 5.6" /></svg>
@@ -146,6 +192,102 @@ const barPct = computed(() => {
 /// 是不是后台员工（超管/管理员）。只用来决定「用户管理」这一项显不显示，
 /// 真正的权限判断在后端 —— 前端藏起来只是不误导，不是安全边界。
 const isStaff = computed(() => me.value?.role === 'SUPER_ADMIN' || me.value?.role === 'ADMIN')
+
+/* ==================== 下载记录 / 收藏夹 ==================== */
+
+const downloads = ref([])
+const stars = ref([])
+const dlOpen = ref(false)
+const starOpen = ref(false)
+
+function fmtSize(b) { return sizeText(b) }
+
+/// 「3 分钟前 / 昨天 / 3-15」。侧栏很窄，放不下完整日期时间。
+function fmtWhen(iso) {
+  if (!iso) return ''
+  const t = new Date(iso).getTime()
+  const diff = Date.now() - t
+  if (diff < 60_000) return '刚刚'
+  if (diff < 3_600_000) return Math.floor(diff / 60_000) + ' 分钟前'
+  if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + ' 小时前'
+  if (diff < 172_800_000) return '昨天'
+  const d = new Date(iso)
+  return `${d.getMonth() + 1}-${d.getDate()}`
+}
+
+async function loadDownloads() {
+  try { downloads.value = await api.downloads(20) } catch (e) { downloads.value = [] }
+}
+async function loadStars() {
+  try { stars.value = await api.stars(30) } catch (e) { stars.value = [] }
+}
+
+/// 两个列表都是「点开才拉」，避免侧栏每次展开都发两个请求。
+async function toggleDl() {
+  dlOpen.value = !dlOpen.value
+  if (dlOpen.value && !downloads.value.length) await loadDownloads()
+}
+async function toggleStar() {
+  starOpen.value = !starOpen.value
+  if (starOpen.value && !stars.value.length) await loadStars()
+}
+
+async function removeDl(d) {
+  try {
+    await api.deleteDownload(d.id)
+    downloads.value = downloads.value.filter(x => x.id !== d.id)
+  } catch (e) { showToast('移除失败') }
+}
+
+async function clearDl() {
+  if (!confirm('清空全部下载记录？文件本身不会被删。')) return
+  try {
+    await api.clearDownloads()
+    downloads.value = []
+  } catch (e) { showToast('清空失败') }
+}
+
+async function unstar(s) {
+  try {
+    await api.unstar(s.nodeId)
+    stars.value = stars.value.filter(x => x.nodeId !== s.nodeId)
+    // 通知列表页把那一行的星标也灭掉（两边同时可见，必须同步）
+    window.dispatchEvent(new CustomEvent('drive:stars-changed'))
+  } catch (e) { showToast('取消收藏失败') }
+}
+
+/* 文件列表里点星标时派这个事件过来 —— 收藏夹可能是展开状态，
+ * 不重拉就会和列表显示不一致（列表已取消、这里还留着）。 */
+async function onStarsChanged() {
+  if (starOpen.value) await loadStars()
+}
+
+onMounted(() => {
+  window.addEventListener('drive:stars-changed', onStarsChanged)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('drive:stars-changed', onStarsChanged)
+})
+
+/// 点记录行 = 「去那个文件所在的地方」。
+///
+/// 侧栏是全站常驻的，用户可能在「我的分享」「下载器」页点一条记录 ——
+/// 那里没有文件列表，什么都不会发生。所以统一跳回「我的文件」并进到
+/// 该文件所在的目录，再把 nodeId 交给 Home 高亮。
+///
+/// 用后端给的 parentId 而不是从 path 剥目录名：文件名里带 `/`
+/// 时剥法会出错，而且 path 的格式将来可能改。
+function openFile(nodeId, parentId) {
+  if (!nodeId) { showToast('这个文件已经被删除了'); return }
+  router.push({
+    path: '/',
+    query: parentId ? { parent: parentId, node: nodeId } : { node: nodeId },
+  })
+  open.value = false
+  nextTick(() => window.dispatchEvent(
+    new CustomEvent('drive:focus-node', { detail: { nodeId } })))
+}
+
 
 function clear() {
   keyword.value = ''
@@ -421,6 +563,76 @@ onMounted(loadMe)
                         background: linear-gradient(90deg, #5b76f7, #7b5bf7);
                         transition: width .3s ease; }
 .rail-quota-num { font-size: 11.5px; color: var(--ink-3); margin-top: 6px; }
+
+/* ===== 下载记录 / 收藏夹 =====
+   默认折叠成一行标题：抽屉本体只有 268px，两个列表都摊开会把菜单挤掉。 */
+.rail-sec { margin-bottom: 6px; }
+
+.rail-sec-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 9px; border: 0; border-radius: 8px; background: transparent;
+  font: inherit; font-size: 13px; color: var(--ink-2); cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.rail-sec-head:hover { background: #f3f5fd; color: var(--ink); }
+.sec-ic { width: 15px; height: 15px; flex-shrink: 0; fill: none; stroke: currentColor;
+          stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.star-ic { fill: none; }
+.sec-title { flex: 1; text-align: left; }
+.sec-badge {
+  font-size: 10.5px; font-weight: 600; min-width: 17px; height: 17px;
+  padding: 0 5px; border-radius: 9px; background: var(--brand-soft);
+  color: var(--brand-deep); display: grid; place-items: center;
+  font-variant-numeric: tabular-nums;
+}
+.sec-caret {
+  width: 13px; height: 13px; flex-shrink: 0; fill: none; stroke: currentColor;
+  stroke-width: 2; stroke-linecap: round; transition: transform .18s ease;
+}
+.rail-sec.folded .sec-caret { transform: rotate(-90deg); }
+
+/* 折叠：高度 0 + 不可见。用 max-height 过渡而不是 display:none，
+   否则展开时是「啪」地跳出来，和抽屉那种慢慢拉开的感觉不一致。 */
+.sec-list {
+  overflow: hidden; max-height: 240px;
+  transition: max-height .22s ease, opacity .18s ease;
+  opacity: 1;
+}
+.rail-sec.folded .sec-list { max-height: 0; opacity: 0; }
+
+.sec-row { display: flex; align-items: center; gap: 2px; }
+.sec-row:hover { background: #f7f9ff; border-radius: 7px; }
+
+.row-main {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;
+  padding: 5px 8px; border: 0; border-radius: 7px; background: transparent;
+  font: inherit; text-align: left; cursor: pointer; color: inherit;
+}
+.row-name {
+  font-size: 12.5px; color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.row-meta { font-size: 10.5px; color: var(--ink-3);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.row-del {
+  width: 18px; height: 18px; flex-shrink: 0; border: 0; border-radius: 5px;
+  background: transparent; color: var(--ink-3); font-size: 14px; line-height: 1;
+  cursor: pointer; opacity: 0; transition: opacity .15s, background .15s, color .15s;
+}
+.sec-row:hover .row-del { opacity: 1; }
+.row-del:hover { background: #f0f2f8; color: var(--danger); }
+
+.sec-empty {
+  padding: 10px 9px 12px; font-size: 11.5px; color: var(--ink-3);
+  text-align: center;
+}
+.sec-more {
+  display: block; width: 100%; padding: 5px; margin-top: 2px;
+  border: 0; background: transparent; border-radius: 7px;
+  font: inherit; font-size: 11px; color: var(--ink-3); cursor: pointer;
+}
+.sec-more:hover { background: #f5f6fb; color: var(--danger); }
 
 .rail-nav { display: flex; flex-direction: column; gap: 2px; }
 .rail-item {

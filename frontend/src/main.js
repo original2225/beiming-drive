@@ -17,6 +17,7 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', component: Login, meta: { public: true } },
+    { path: '/forgot', component: () => import('./pages/ForgotPassword.vue'), meta: { public: true } },
     { path: '/', component: Home },
     { path: '/shares', component: Shares },
     { path: '/downloader', component: Downloader },

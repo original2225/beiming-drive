@@ -149,11 +149,8 @@
           </div>
           <div class="field">
             <span class="field-label">默认排序</span>
-            <select v-model="display.sort" class="ipt" @change="setDisplay('sort', display.sort)">
-              <option value="name">按名称</option>
-              <option value="mtime">按修改时间</option>
-              <option value="size">按大小</option>
-            </select>
+            <ThemeSelect v-model="display.sort" :options="sortOpts"
+                         @change="v => setDisplay('sort', v)" />
           </div>
           <div class="field">
             <span class="field-label">默认列表样式</span>
@@ -205,11 +202,8 @@
           <h3 class="grp-title">上传</h3>
           <div class="field">
             <span class="field-label">重名时怎么办</span>
-            <select v-model="transfer.dup" class="ipt" @change="setTransfer('dup', transfer.dup)">
-              <option value="rename">自动改名（加序号）</option>
-              <option value="overwrite">覆盖同名文件</option>
-              <option value="skip">跳过不传</option>
-            </select>
+            <ThemeSelect v-model="transfer.dup" :options="dupOpts"
+                         @change="v => setTransfer('dup', v)" />
             <div class="tip">默认「自动改名」——我最推荐，不会误删东西。</div>
           </div>
         </div>
@@ -222,6 +216,7 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, getToken } from '../api.js'
+import ThemeSelect from '../components/ThemeSelect.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -414,6 +409,18 @@ const densities = [{ v: 'comfortable', label: '舒适' }, { v: 'compact', label:
 const views = [{ v: 'list', label: '列表' }, { v: 'grid', label: '大图' }]
 const zones = [{ v: 'local', label: '本地时间' }, { v: 'utc', label: 'UTC' }]
 const timeFmts = [{ v: 'abs', label: '完整时间' }, { v: 'rel', label: '相对时间' }]
+
+// 自绘下拉的选项（原来的 <option> 换到这里）
+const sortOpts = [
+  { value: 'name', label: '按名称' },
+  { value: 'mtime', label: '按修改时间' },
+  { value: 'size', label: '按大小' },
+]
+const dupOpts = [
+  { value: 'rename', label: '自动改名（加序号）' },
+  { value: 'overwrite', label: '覆盖同名文件' },
+  { value: 'skip', label: '跳过不传' },
+]
 
 function readPref(key, fallback) {
   try { return { ...fallback, ...JSON.parse(localStorage.getItem(key) || '{}') } }

@@ -29,11 +29,14 @@ public class DownloadController {
     private final FileService files;
     private final BlobStore blobs;
     private final CurrentUser currentUser;
+    private final UserFileMarksService marks;
 
-    public DownloadController(FileService files, BlobStore blobs, CurrentUser currentUser) {
+    public DownloadController(FileService files, BlobStore blobs,
+                              CurrentUser currentUser, UserFileMarksService marks) {
         this.files = files;
         this.blobs = blobs;
         this.currentUser = currentUser;
+        this.marks = marks;
     }
 
     @GetMapping("/{id}/download")
@@ -79,6 +82,15 @@ public class DownloadController {
         }
 
         long length = end - start + 1;
+
+        // 只在"第一段"记一次下载记录。
+        // 这个接口支持 Range，专属下载器会把一个文件切成几十段并发拉，
+        // 每段都记的话"下载次数"会变成 30、90 这种鬼数字。
+        // start == 0 是每轮下载的第一次请求，正好一次。
+        if (!partial || start == 0) {
+            marks.recordDownload(currentUser.require().userId(), id,
+                    node.name(), node.path(), size);
+        }
 
         res.setStatus(partial ? HttpServletResponse.SC_PARTIAL_CONTENT : HttpServletResponse.SC_OK);
         res.setContentType(node.mime() == null ? "application/octet-stream" : node.mime());

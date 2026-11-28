@@ -145,6 +145,25 @@ export const api = {
     request(`/account/users/${id}/status`, { method: 'PUT', body: { status } }),
   setUserQuota: (id, quota) =>
     request(`/account/users/${id}/quota`, { method: 'PUT', body: { quota } }),
+
+  // --- 下载记录 / 收藏（右侧栏） ---
+  downloads: (limit = 20) => request(`/me/downloads?limit=${limit}`),
+  clearDownloads: () => request('/me/downloads', { method: 'DELETE' }),
+  deleteDownload: (id) => request(`/me/downloads/${id}`, { method: 'DELETE' }),
+
+  stars: (limit = 30) => request(`/me/stars?limit=${limit}`),
+  star: (nodeId) => request(`/me/star/${nodeId}`, { method: 'POST' }),
+  unstar: (nodeId) => request(`/me/star/${nodeId}`, { method: 'DELETE' }),
+  /** 一次问「这些文件里我收藏了哪些」，避免列表每行发一个请求 */
+  starredIn: (ids) => request('/me/stars/in', { method: 'POST', body: { ids } }),
+
+  // --- 忘记密码（未登录，三步） ---
+  forgotQuestions: (email) =>
+    request('/auth/forgot/questions', { method: 'POST', body: { email } }),
+  forgotVerify: (email, answers) =>
+    request('/auth/forgot/verify', { method: 'POST', body: { email, answers } }),
+  forgotReset: (ticket, password) =>
+    request('/auth/forgot/reset', { method: 'POST', body: { ticket, password } }),
 };
 
 export function downloadUrl(id) {

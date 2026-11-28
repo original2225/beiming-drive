@@ -135,6 +135,8 @@ public class AccountService {
             else if (c == '　') sb.append(' ');                          // 全角空格
             else sb.append(c);
         }
+        // toLowerCase 只影响 ASCII 字母；中文原样保留，这正是我们要的
+        // （「实验小学」和「实验小学」相等，「ABC」和「abc」也相等）
         return sb.toString().toLowerCase();
     }
 
