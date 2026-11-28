@@ -29,14 +29,26 @@
 
         <div class="mini-foot">
           <!-- 收起态不放头像：只有 32px 大，认不出是谁，还占掉最显眼的位置。
-               改成电池 + 百分比，用最少的像素回答「我还剩多少空间」。 -->
-          <button class="mini-battery" :class="{ 'is-full': Number(pct) >= 90 }"
-                  :title="`已用 ${usedText} / ${quotaText}（${pct}%）`"
+               改成横向电池：百分比写在电池里，数字右边挂一个状态图标。 -->
+          <button class="mini-battery" :class="batLevel" :title="batTip"
                   @click="router.push('/storage')">
             <span class="bat-shell">
-              <span class="bat-fill" :style="{ height: barPct > 0 ? Math.max(barPct, 7) + '%' : '0%' }"></span>
+              <span class="bat-fill" :style="{ width: barWidth }"></span>
+              <span class="bat-label">
+                <span class="bat-num">{{ batText }}<i>%</i></span>
+                <!-- 绿叶 / 闪电，按花蝉原话「比如电能，绿叶什么的」。
+                     语义靠剩余量走：余量充足是绿叶（松口气），
+                     开始吃紧是闪电（有点紧张），见底是红闪电。
+                     这里刻意不追求「图标语义精确」，要的是有生气、扫一眼有情绪。 -->
+                <svg v-if="batIcon === 'leaf'" class="bat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 19c0-8 6-14 15-14 0 9-6 15-14 15" />
+                  <path d="M5 19c3-4 7-7 11-9" />
+                </svg>
+                <svg v-else class="bat-ico" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M13 3L5 13.5h5.5L10 21l8-10.5h-5.5L13 3z" />
+                </svg>
+              </span>
             </span>
-            <span class="bat-pct">{{ batText }}<i>%</i></span>
           </button>
           <button class="mini-toggle" title="展开侧栏" @click="collapsed = false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
@@ -96,18 +108,35 @@
           <span class="quota-go">›</span>
         </button>
 
-        <!-- 存储空间：整块是可点的，进「存储空间」页。
-             之前只是静态展示，看着像能点却没反应。
-             hover 时整块轻微提亮 + 右侧浮出箭头，给「这里有下一页」的暗示。 -->
-        <button v-if="curShowQuota" type="button" class="quota" @click="router.push('/storage')">
+        <!-- 存储空间：整块可点，进「存储空间」页。
+             用的是收起态那颗电池的「放大版」：
+             同一个大圆角外框 + 填充 + 数字 + 状态图标，
+             只是这里横向空间够，把「存储空间」标签和明细一起写进去。
+             这样收放侧栏时，底部是同一个东西在变大变小，
+             而不是收起是一颗电池、展开变成另一种进度条。 -->
+        <button v-if="curShowQuota" type="button" class="quota" @click="router.push('/storage')"
+                :title="batTip">
           <div class="quota-top">
-            <span class="muted">存储空间</span>
+            <span>存储空间</span>
             <span class="quota-go">›</span>
           </div>
-          <div class="bar"><div class="bar-in" :style="{ width: Math.max(barPct, barPct > 0 ? 2 : 0) + '%' }"></div></div>
+          <div class="quota-bat" :class="batLevel">
+            <span class="quota-fill" :style="{ width: barWidth }"></span>
+            <span class="quota-label">
+              <span class="quota-pct">{{ batText }}<i>%</i></span>
+              <span class="quota-free">剩 {{ freeText }}</span>
+              <svg v-if="batIcon === 'leaf'" class="quota-ico" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 19c0-8 6-14 15-14 0 9-6 15-14 15" />
+                <path d="M5 19c3-4 7-7 11-9" />
+              </svg>
+              <svg v-else class="quota-ico" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M13 3L5 13.5h5.5L10 21l8-10.5h-5.5L13 3z" />
+              </svg>
+            </span>
+          </div>
           <div class="quota-num">
-            <span>已用 {{ usedText }} / {{ quotaText }}</span>
-            <span class="quota-pct">{{ pct }}%</span>
+            <span class="quota-used">已用 {{ usedText }}</span>
+            <span class="quota-total">共 {{ quotaText }}</span>
           </div>
         </button>
       </div>
@@ -302,15 +331,47 @@ const pct = computed(() => {
   const p = (me.value?.storageUsed / me.value?.storageQuota) * 100 || 0
   return p > 0 ? p.toFixed(1) : '0.0'
 })
-/* 电池上的数字：不足 1% 时显示 <1，而不是圆整成 0。
-   新账号就是 9.8KB / 50GB，真实值是 0.00002%，四舍五入成 0%
-   会让人以为「一格都没用」，看到电池空着反而困惑。 */
+/* 剩余空间百分比：电池整套显示逻辑都基于它，不是已用比例 */
+const freePct = computed(() => {
+  const q = me.value?.storageQuota || 0
+  if (!q) return 100
+  const p = 100 - ((me.value?.storageUsed || 0) / q) * 100
+  return Math.max(0, Math.min(100, p))
+})
+
+/* 电池上的数字：显示「还剩多少」而不是「用了多少」。
+   这是电池这个图形的语义 —— 满格=有空间，空格=快满了。
+   原来显示已用比例，结果 0% 已用配一个空电池 + 绿叶，自己和自己打架
+   （0% 已用其实是空间全满、最健康的状态）。
+   不足 1% 剩余时显示 <1，避免圆整成 0 让人以为一点不剩。 */
 const batText = computed(() => {
-  const p = (me.value?.storageUsed / me.value?.storageQuota) * 100 || 0
-  if (p <= 0) return '0'
-  if (p < 1) return '<1'
+  const p = freePct.value
+  if (p >= 100) return '100'
+  if (p > 0 && p < 1) return '<1'
   return Math.round(p)
 })
+
+/* 电池填充宽度 = 剩余比例。给 8% 下限：剩余极少时也要看得见一格，
+   否则像渲染坏了而不是「快用完了」。 */
+const barWidth = computed(() => {
+  const p = freePct.value
+  return p <= 0 ? '0%' : Math.max(p, 8).toFixed(1) + '%'
+})
+
+/* 三档状态：图标和配色都跟着剩余量走。
+   · leaf  绿叶 —— 余量充足（剩余超过 40%）
+   · bolt  闪电 —— 过半在用（剩余 15%~40%）
+   · alarm 红色闪电 —— 快满了（剩余不到 15%） */
+const batLevel = computed(() => {
+  const p = freePct.value
+  if (p < 15) return 'is-full'
+  if (p < 40) return 'is-warn'
+  return ''
+})
+const batIcon = computed(() => (freePct.value < 40 ? 'bolt' : 'leaf'))
+const freeText = computed(() => sizeText((me.value?.storageQuota || 0) - (me.value?.storageUsed || 0)))
+const batTip = computed(() =>
+  `还剩 ${sizeText((me.value?.storageQuota || 0) - (me.value?.storageUsed || 0))} / 共 ${quotaText.value}，已用 ${pct.value}%`)
 </script>
 
 <style scoped>
@@ -335,9 +396,11 @@ const batText = computed(() => {
    稳妥做法是再叠一层，把收起态抬到明显更高的权重，别赌顺序。 */
 .shell.side-collapsed .side,
 .side.side-collapsed {
-  /* 64px 而不是 56：图标 18px + 左右各 8px 内边距 + 描边，
-     再窄下去悬停的圆角块会贴着边框，看着很挤。 */
-  width: 64px; padding: 18px 8px 16px;
+  /* 78px 而不是原来的 64：电池改成横向之后，这个宽度要能装下
+     「电池框 + 百分比 + 状态图标」。78 - 8×2 内边距 = 62 可用宽度，
+     刚好够百分比（约 24px）+ 图标 10px + 电池框余量。
+     再窄数字就被挤出电池，回到「数字在旁边」的老样子。 */
+  width: 78px; padding: 18px 8px 16px;
 }
 .side-full { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .side-brand {
@@ -359,9 +422,15 @@ const batText = computed(() => {
 
 /* ---------- 收起态 ---------- */
 .side-mini {
-  height: 100%; display: flex; flex-direction: column; align-items: center;
+  height: 100%; display: flex; flex-direction: column;
+  /* stretch 而不是 center：横向电池要撑满整个条宽，
+     否则会缩成「百分比+图标」那么宽（实测只有 36px）。
+     需要居中的元素（logo、展开箭头）自己写 margin:auto 居中。 */
+  align-items: stretch;
   gap: 14px;
 }
+.mini-brand, .mini-toggle { align-self: center; }
+.mini-nav { align-items: center; }
 .mini-brand {
   width: 34px; height: 34px; border-radius: 50%; padding: 0; border: 0;
   background: transparent; cursor: pointer; flex-shrink: 0;
@@ -434,46 +503,92 @@ const batText = computed(() => {
 .mini-gap:hover .gap-tip { opacity: 1; transform: translateX(2px); }
 
 .mini-foot { display: flex; flex-direction: column;
-             align-items: center; gap: 10px; padding-top: 6px; }
+             align-items: stretch; gap: 10px; padding-top: 6px; }
+.mini-foot .mini-toggle { margin: 0 auto; }
 
-/* ---- 电池：收起态的存储指示 ----
-   竖着的电池，填充从底部往上长；旁边一行百分比。
-   为什么不用环形进度：电池的形状一眼就是「还剩多少」，
-   环形还要读刻度。 */
+/* ---- 电池：收起态的存储指示（横向）----
+   百分比写在电池内部右侧，数字末尾挂状态图标。
+   为什么横放：竖电池在 48px 宽的条里只能占 16px，剩下的宽度全浪费；
+   横过来之后百分比和图标都能塞进电池里，一个元素说清三件事
+   （用了多少 / 还剩多少 / 健不健康）。 */
 .mini-battery {
-  display: flex; flex-direction: column; align-items: center; gap: 5px;
-  border: 0; background: transparent; cursor: pointer; padding: 2px 0;
+  border: 0; background: transparent; cursor: pointer;
+  padding: 0; display: block; width: 100%;
+  position: relative;   /* 正极伪元素的定位基准 */
   transition: transform .18s cubic-bezier(.3,.6,.35,1);
 }
 .mini-battery:hover { transform: translateY(-1px); }
+
+/* ---- 电池：收起态的存储指示（横向）----
+   只有一层外框 + 大圆角。以前里面还套了个白色小胶囊装数字，
+   那等于在框里又画了一个框，看着"厚"。现在数字直接压在填充上，
+   靠白色文字描边保证任何底色下都读得清。 */
 .bat-shell {
   position: relative;
-  width: 16px; height: 30px;
-  border: 1.6px solid #c3cade; border-radius: 4px;
-  /* 电池正极的小凸起 */
-  padding: 1.5px;
-  display: flex; align-items: flex-end;
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; height: 24px;
+  border: 1.5px solid #ccd2e4; border-radius: 9px;
+  overflow: hidden;
+  transition: border-color .2s ease;
 }
-.bat-shell::before {
+/* 电池正极：横向后长在右边。
+   注意挂在 .mini-battery 上而不是 .bat-shell 上 ——
+   电池框为裁住填充圆角设了 overflow:hidden，任何贴边的伪元素都会被一起裁掉。
+   所以电池框用 margin-right 让出 4px，正极画在外层这个空隙里。 */
+.bat-shell { margin-right: 4px; }
+.mini-battery::after {
   content: '';
-  position: absolute; left: 50%; top: -4px;
-  width: 6px; height: 2.4px; margin-left: -3px;
-  background: #c3cade; border-radius: 1px;
+  position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 8px;
+  background: #c8cee0; border-radius: 1px 3px 3px 1px;
+  transition: background .2s ease;
 }
+.mini-battery.is-full::after { background: #e88d80; }
 .bat-fill {
-  width: 100%; border-radius: 2px;
-  background: linear-gradient(180deg, #6b7bf8, #5b76f7);
-  transition: height .5s cubic-bezier(.3,.55,.4,.95);
+  position: absolute; left: 0; top: 0; bottom: 0;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #7b8bfa, #5b76f7);
+  transition: width .55s cubic-bezier(.3,.55,.4,.95), background .3s ease;
 }
-.bat-pct {
-  /* 10.5px 在这个宽度上偏小，实测截图里几乎读不出来；11.5px 才够 */
-  font-size: 11.5px; font-weight: 600; color: var(--ink-2);
-  font-variant-numeric: tabular-nums; letter-spacing: -.2px;
+/* 数字 + 图标：直接压在填充上，不再套内层白框。
+   描边只留一层极轻的（16 层光晕会糊成一团，实测观感像早年彩字），
+   真正保证可读性的是深色字本身 —— 蓝/琥珀/红三种填充都够深。 */
+.bat-label {
+  position: relative; z-index: 2;
+  display: flex; align-items: center; gap: 3px;
+  font-size: 10.5px; font-weight: 700; line-height: 1;
+  color: #0f1526;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 1px rgba(255,255,255,.55);
 }
-.bat-pct i { font-style: normal; font-size: 9px; font-weight: 500; color: var(--ink-3); }
-/* 快满了换个颜色提醒一下 —— 电池满格变红是通用语汇 */
-.mini-battery.is-full .bat-fill { background: linear-gradient(180deg, #f0836f, #e2574a); }
-.mini-battery.is-full .bat-pct { color: var(--danger); }
+.bat-num i { font-style: normal; font-size: 8px; font-weight: 600; opacity: .8; }
+.bat-ico {
+  /* 9px 而不是 11：实测 11px 时图标高度 (11) 已经超过数字的 10.5，
+     视觉上和数字抢主角，叶子显得笨。9px 约等于文字高度的 0.85，
+     图标退成"注脚"的位置，数字才是主体。 */
+  width: 9px; height: 9px; flex-shrink: 0;
+  fill: none; stroke: currentColor;
+  stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round;
+  transition: stroke .25s ease, transform .3s ease;
+}
+/* 图标单独上色，不跟文字走 —— 要的就是「生动」：
+   绿叶是绿的、闪电是琥珀的、见底是红的。
+   形状和颜色同时变，不用读数字也能感到「还宽裕 / 有点紧 / 该清理了」。 */
+.mini-battery .bat-ico { stroke: #2ea86a; }
+.mini-battery.is-warn .bat-ico { stroke: #f0912b; }
+.mini-battery.is-full .bat-ico { stroke: #e2574a; }
+/* 悬停时叶子轻轻摇一下，闪电微微放大 —— 让图标显得是活的 */
+.mini-battery:hover .bat-ico { transform: rotate(-10deg) scale(1.12); }
+.mini-battery.is-warn:hover .bat-ico,
+.mini-battery.is-full:hover .bat-ico { transform: scale(1.15); }
+
+/* 60% 以下剩余：琥珀色 —— 空间开始紧 */
+.mini-battery.is-warn .bat-fill { background: linear-gradient(90deg, #f8b64c, #f0912b); }
+.mini-battery.is-warn .bat-shell { border-color: #f0cf9a; }
+
+/* 剩余 15% 以下：满格红 */
+.mini-battery.is-full .bat-fill { background: linear-gradient(90deg, #f0836f, #e2574a); }
+.mini-battery.is-full .bat-shell { border-color: #f0b3aa; }
 
 .mini-toggle {
   width: 30px; height: 30px; border-radius: 9px;
@@ -586,9 +701,48 @@ const batText = computed(() => {
 }
 .quota:hover .quota-go { opacity: 1; transform: translateX(0); }
 .quota-top { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 8px; }
-.bar { height: 6px; border-radius: 3px; background: #eef0f7; overflow: hidden; }
-.bar-in { height: 100%; border-radius: 3px; background: linear-gradient(90deg, #5b76f7, #7b5bf7);
-          transition: width .5s cubic-bezier(.3,.55,.4,.95); }
+/* 展开态的存储条 = 收起态电池的放大版。
+   同一套视觉语言：一层大圆角外框 + 填充 + 压在里面的数字，
+   只是这里宽度够，能多带「剩 X」和用量明细。
+   颜色和图标都走同一个 batLevel / batIcon，两处永远不会不一致。 */
+.quota-bat {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  height: 30px;
+  border: 1.5px solid #ccd2e4; border-radius: 11px;
+  overflow: hidden;
+  transition: border-color .2s ease;
+}
+.quota-fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: linear-gradient(90deg, #7b8bfa, #5b76f7);
+  transition: width .55s cubic-bezier(.3,.55,.4,.95), background .3s ease;
+}
+.quota-label {
+  position: relative; z-index: 2;
+  display: flex; align-items: center; gap: 5px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(255,255,255,.6);
+}
+.quota-pct { font-size: 13px; font-weight: 700; color: #0f1526; }
+.quota-pct i { font-style: normal; font-size: 9.5px; font-weight: 600; opacity: .8; }
+.quota-free { font-size: 11px; font-weight: 600; color: #364063; opacity: .9; }
+.quota-ico {
+  width: 12px; height: 12px; flex-shrink: 0;
+  fill: none; stroke: currentColor;
+  stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round;
+  transition: transform .3s ease;
+}
+.quota:hover .quota-ico { transform: rotate(-10deg) scale(1.12); }
+
+/* 三档配色，和收起态一一对应 */
+.quota-bat .quota-ico { stroke: #2ea86a; }
+.quota-bat.is-warn .quota-fill { background: linear-gradient(90deg, #f8b64c, #f0912b); }
+.quota-bat.is-warn .quota-ico { stroke: #f0912b; }
+.quota-bat.is-warn { border-color: #f0cf9a; }
+.quota-bat.is-full .quota-fill { background: linear-gradient(90deg, #f0836f, #e2574a); }
+.quota-bat.is-full .quota-ico { stroke: #e2574a; }
+.quota-bat.is-full { border-color: #f0b3aa; }
 .quota-num {
   display: flex; justify-content: space-between; align-items: baseline;
   font-size: 12px; color: var(--ink-2); margin-top: 7px;
@@ -596,6 +750,10 @@ const batText = computed(() => {
 }
 /* 百分比单独一点强调：数值行之前斜杠+中点全糊在一起，扫不出来 */
 .quota-pct { font-weight: 600; color: var(--brand-deep); }
+/* 数值行左右两端分开放，不堆成「X / Y · Z%」一串：
+   左边说已用多少，右边说总量，扫读时一眼抓住自己关心的那半。 */
+.quota-used { color: var(--ink-2); }
+.quota-total { color: var(--ink-3); }
 
 /* ===== 内容区过渡（侧栏不参与）=====
  * 离场 0.16s 短于入场 0.26s：两段尾巴重叠，避免出现「两边都不存在」的空白帧。
