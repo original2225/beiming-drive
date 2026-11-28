@@ -3,11 +3,81 @@
 > **交接用法**：开新会话第一句说「先读 README.md 和 PROJECT_MEMORY.md，只看最新一节，然后做 <具体下一步>，别动其他模块」。README 讲**怎么用/怎么部署**，本文件讲**做到哪、为什么这么做、接下来做什么**。
 > 每完成一块完整功能就往下追加一节（格式见文末）。上下文到 10 万 token 左右就换会话。
 
-## 一句话现状（更新于 2026-11-27 深夜）
+## 一句话现状（更新于 2026-11-28 傍晚）
 
-自研网盘（不是 Cloudreve 换皮）主功能已闭环：登录、文件树、上传下载、sha256 分卷去重、在线预览、分享、回收站、专属多线程下载器、自研站内搜索、右侧竖栏 + 新建菜单。**回收站 30 天自动清理 + 孤儿 blob 回收已完成并上线**，顺手修掉了三个此前就存在的 bug（详见下）。全部提交已 push 到 origin。
+自研网盘（不是 Cloudreve 换皮）主功能已闭环：登录、文件树、上传下载、sha256 分卷去重、在线预览、分享、回收站、专属多线程下载器、自研站内搜索、右侧竖栏 + 新建菜单、**四角色权限模型 + 独立设置页 + 用户管理页**。回收站 30 天自动清理 + 孤儿 blob 回收已完成并上线。全部提交已 push 到 origin。
 
-## 收工状态（2026-11-27 23:00，本轮「回收站自动清理」收工）
+## 收工状态（2026-11-28 17:10，本轮「四角色权限 + 设置页」收工）
+
+- 分支 `main`，**HEAD `0b1f4dd`，已推送 origin/main**，工作区干净
+- 迁移已应用到 **V5**（四角色 + bio/qq/email_verified + drv_security_answer 表）
+- 线上库只剩两个真实账号：`admin@beiming.local`（SUPER_ADMIN）、`1578086557@qq.com`（USER）；测试账号全清，七张引用表孤儿行 0
+- 端到端脚本 `cache/verify_roles.py` **35 项全过**，可重复跑（自建自清）
+- 容器 `drive-app` 健康 UP，`drive-postgres` 健康
+
+### 本轮踩到的三个坑（都会再犯，记住）
+
+1. **`PasswordEncoder` 注入必炸**：本项目从未注册该 bean，`AuthService` 是自己 `new BCryptPasswordEncoder(10)`。
+   新写的 service 若用 `@Autowired PasswordEncoder` 会直接 `UnsatisfiedDependencyException` 起不来容器
+   （现象：`docker ps` 显示 `Restarting (1)`，日志里才看到 cause）。
+2. **`build` 成功 ≠ 新代码进镜像**：这次第一次构建就"成功"了，但容器起不来。必须
+   `docker exec drive-app sh -c 'grep -c st-tabs /app/web/assets/*.css'` 核验产物 + 看
+   `docker logs drive-app | grep -i "error\|failed"`。
+3. **测试账号不能只删 3 张表**：云盘库有 **7 张**表引用 `drv_user` ——
+   `drv_session` / `drv_node` / `drv_upload` / `drv_share` / `drv_remote_job` / `drv_audit` / `drv_security_answer`。
+   漏了会留孤儿行。正确做法是先扫再删：
+   ```sql
+   select table_name, column_name from information_schema.columns
+   where table_schema='public' and (column_name like '%user_id%' or column_name like '%owner_id%');
+   ```
+
+### 测试时发现的"假失败"（不是 bug，别乱改代码）
+
+- 管理员封禁用户后，该用户 token 立刻失效（`setStatus` 里 revoke 全部 session 是**正确行为**），
+  后续用同一个 token 测任何接口都会 401 —— 这是特性不是缺陷。
+- 用户 `storage_used = 0` 时，把配额设成 1 byte 是**合法**的（1 > 0），
+  想测"配额小于已用被拒"必须先造已用量。
+
+## 2026-11-28｜四角色权限模型 + 设置页 + 用户管理页
+
+### 主题
+网盘要给北冥全体用户用。原来的两档角色（USER/ADMIN）撑不住，且 `"ADMIN".equals(role)`
+散在多处各写一遍。本轮把权限收口 + 补上设置页和用户管理页。
+
+### 关键决定
+
+- **角色收口到 `Role` 枚举**（`auth/Role.java`）：`SUPER_ADMIN/ADMIN/USER/GUEST`，
+  `atLeast()` 比层级，`canAssign()` 决定「谁能把谁改成什么」。以后加权限只改这一处。
+- **权限规则**：管理员能管用户和配额，但**提不了管理员**；超管能指派管理员，
+  但**造不出第二个超管**；**不能改自己的角色**（防止把站管降级后没人管站）；
+  GUEST 是「未登录」虚拟身份，**不落库**，指派 GUEST 会被拒（400）。
+- **V5 把存量 ADMIN 升为 SUPER_ADMIN**：升级前那个 ADMIN 就是「首个注册用户自动获得」的
+  站主，不升的话新库一个超管都没有，系统永久锁死没人能指派管理员。只跑一次。
+- **注册自举**：库空时首个注册者升 SUPER_ADMIN（只为自举），其余一律 USER，仍不要邀请码。
+- **安全问题答案存 BCrypt 哈希**，不存明文 —— 它和密码一样是凭据。答案做归一化
+  （全角转半角、去首尾空格、统一小写），否则「北京」和「北京 」对不上。
+- **封号立刻 revoke 全部 session**：否则他手上的 token 还能用到过期。
+- **退出其他设备保留当前这台**：不然自己也被踢出去。
+
+### 前端
+
+- `/settings` 四个 tab：账户（昵称/简介/QQ）、安全（改密码/安全问题/登录设备）、
+  显示（密度/排序/视图/时区/时间格式，存 localStorage）、传输（线程数/重名策略）。
+  当前 tab 记在 `?tab=` 里，刷新和前进后退都能回到原处。
+- `/admin/users` 用户管理：角色下拉**只列出操作者有权指派的选项**，选不了的干脆不出现。
+  配额编辑用自绘弹窗（原生 `prompt` 会卡死自动化）。
+- 侧栏菜单加「设置」「用户管理」，后者仅 `isStaff`（超管/管理员）可见。
+  **前端隐藏不是安全边界**，真正的闸门在 `AccountController.requireAdmin()`。
+
+### 新增路由要同步三处（漏一处就出问题）
+
+1. `frontend/src/main.js` 的 `routes`
+2. `backend/.../web/SpaWebController.java` 的 `@GetMapping` 白名单 —— 漏了直接访问 404
+3. `frontend/src/components/AppShell.vue` 的 `contentKeyOf()` —— 漏了切页过渡 key 错乱
+
+## 2026-11-27｜回收站 30 天自动清理 + 彻底删除真正释放磁盘
+
+（上一轮，保留备查）
 
 - 分支 `main`，**与 origin/main 同步**，工作区干净
 - 本机 8140 跑的是 `drive-app` 容器（不是本机 java 进程，那次是更早的情况）；
