@@ -29,6 +29,8 @@
                  :placeholder="mode === 'register' ? '至少 8 位' : '输入密码'" />
         </label>
 
+        <div v-if="resetOk" class="ok-tip">密码已改好，请用新密码登录</div>
+
         <div v-if="error" class="err">{{ error }}</div>
 
         <button class="btn btn-primary submit" type="submit" :disabled="busy">
@@ -56,6 +58,9 @@ const nickname = ref('')
 const password = ref('')
 const busy = ref(false)
 const error = ref('')
+// 从「忘记密码」改完跳回来时带 ?reset=1，给一句成功提示 ——
+// 否则用户改完密码回到登录页，看不出刚才到底成没成功。
+const resetOk = ref(new URLSearchParams(location.search).get('reset') === '1')
 // 登录成功后先播「卡片收缩 → 淡出」再跳转；跳得太快什么都看不见
 const leaving = ref(false)
 
@@ -176,6 +181,12 @@ label span { display: block; font-size: 12.5px; color: var(--ink-2); margin-bott
 .submit { width: 100%; height: 40px; justify-content: center; margin-top: 8px; }
 .err {
   background: #fff5f4; color: var(--danger); border: 1px solid #ffd5d2;
+  padding: 9px 12px; border-radius: 9px; font-size: 12.5px; margin-bottom: 14px;
+}
+/* 改完密码跳回来的成功提示。用绿而不是紫：紫色是主色，留给「操作」；
+   这里是「状态已达成」，成功色更合语义。 */
+.ok-tip {
+  background: #edfaf4; color: #12805c; border: 1px solid #c6efdd;
   padding: 9px 12px; border-radius: 9px; font-size: 12.5px; margin-bottom: 14px;
 }
 </style>
